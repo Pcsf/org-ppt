@@ -73,6 +73,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'seq)
+(require 'json)
 
 (defgroup org-ppt nil
   "Export Org files to self-contained HTML slide decks."
@@ -165,6 +166,15 @@ deliberately not offered because it needs a CDN at display time."
                  (const verbatim))
   :group 'org-ppt)
 
+(defcustom org-ppt-node-program "node"
+  "Node executable used to typeset math at export time.
+When it is on PATH the deck ships pre-rendered math and only the font
+faces that math uses; when it is not, the deck ships the KaTeX runtime and
+every face instead.  Both render identically — the second is the larger
+file."
+  :type 'string
+  :group 'org-ppt)
+
 (defcustom org-ppt-browser-function #'browse-url
   "Function called with the exported file URL to preview a deck."
   :type 'function
@@ -209,6 +219,14 @@ deliberately not offered because it needs a CDN at display time."
   "Non-nil once the export in progress has transcoded a math fragment.
 Gates the KaTeX payload, so a deck without math carries none of it.")
 
+(defvar org-ppt--math-prerender nil
+  "Non-nil when this export types the math itself instead of shipping a runtime.")
+
+(defvar org-ppt--math-queue nil
+  "Math collected during transcoding, newest first.
+Each entry is (TEX DISPLAY FALLBACK): the source handed to KaTeX, whether
+it is display math, and the form to emit if pre-rendering falls through.")
+
 (defun org-ppt--katex-directory ()
   "Return the directory holding the bundled KaTeX distribution."
   (expand-file-name "katex" (org-ppt--asset-directory)))
@@ -235,19 +253,98 @@ Gates the KaTeX payload, so a deck without math carries none of it.")
                  (buffer-string))
                t)))))
 
-(defun org-ppt--katex-css ()
-  "Return the KaTeX stylesheet with every font face inlined.
+(defun org-ppt--css-blocks (css)
+  "Return CSS as a list of (SELECTOR . DECLARATIONS) pairs."
+  (let ((pos 0) (blocks nil))
+    (while (string-match "\\([^{}]+\\){\\([^{}]*\\)}" css pos)
+      (push (cons (match-string 1 css) (match-string 2 css)) blocks)
+      (setq pos (match-end 0)))
+    (nreverse blocks)))
+
+(defun org-ppt--matches (regexp string &optional group)
+  "Return every match of REGEXP in STRING, or its GROUP when given."
+  (let ((pos 0) (found nil))
+    (while (string-match regexp string pos)
+      (push (match-string (or group 0) string) found)
+      (setq pos (match-end 0)))
+    (nreverse found)))
+
+(defun org-ppt--selector-classes (selector)
+  "Return the classes of the element SELECTOR targets.
+Only the rightmost compound matters: `.katex .mathnormal' targets an
+element carrying `mathnormal', not every descendant of `.katex'.  When the
+rightmost compound is a bare tag, as in `.delim-size1>span', the nearest
+compound that does carry classes is used instead."
+  (let ((compounds (nreverse (split-string selector "[ \t\n>+~]+" t)))
+        (classes nil))
+    (while (and compounds (not classes))
+      (setq classes (org-ppt--matches "\\.\\([A-Za-z][A-Za-z0-9_-]*\\)"
+                                      (pop compounds) 1)))
+    classes))
+
+(defun org-ppt--katex-font-rules ()
+  "Return (CLASSES . FAMILIES) for every rule that selects a KaTeX face.
+Read from the bundled stylesheet rather than written out here, because a
+hand-kept table would drift the first time upstream adds a face.  Both the
+`font-family' declarations and the `font' shorthand on `.katex' are seen."
+  (let ((rules nil))
+    (dolist (block (org-ppt--css-blocks (org-ppt--katex-asset "katex.min.css")))
+      (let ((selector (string-trim (car block)))
+            (families (delete-dups
+                       (org-ppt--matches "KaTeX_[A-Za-z0-9]+" (cdr block)))))
+        (when (and families (not (string-prefix-p "@" selector)))
+          (dolist (part (split-string selector "," t "[ \t\n]+"))
+            (let ((classes (org-ppt--selector-classes part)))
+              (when classes (push (cons classes families) rules)))))))
+    rules))
+
+(defun org-ppt--katex-families-used (html)
+  "Return the KaTeX font families the rendered HTML actually asks for.
+A rule counts only when one element carries every class of its selector,
+so a compound like `.delimsizing.size4' does not pull in a face merely
+because the two classes appear on different elements."
+  (let ((rules (org-ppt--katex-font-rules))
+        (used nil))
+    (dolist (attribute (org-ppt--matches "class=\"\\([^\"]*\\)\"" html 1))
+      (let ((present (split-string attribute "[ \t\n]+" t)))
+        (dolist (rule rules)
+          (when (cl-every (lambda (class) (member class present)) (car rule))
+            (dolist (family (cdr rule))
+              (cl-pushnew family used :test #'equal))))))
+    ;; `.katex' itself sets KaTeX_Main through the font shorthand, so a deck
+    ;; with any math reaches it; the floor only covers a deck with none.
+    (or used (list "KaTeX_Main"))))
+
+(defun org-ppt--katex-css (&optional families)
+  "Return the KaTeX stylesheet with its font faces inlined.
+With FAMILIES, keep only the faces belonging to those families and drop
+the rest, which is what makes a deck carry the four or five faces it uses
+instead of all twenty.  Nil keeps every face.
+
 Upstream lists woff2, woff and ttf for each face.  Only woff2 is bundled
 and inlined; the other two are dropped rather than left as broken
 relative URLs, since any browser that can run the deck reads woff2."
   (let ((css (org-ppt--katex-asset "katex.min.css")))
+    (when families
+      (setq css (replace-regexp-in-string
+                 "@font-face{[^{}]*}"
+                 (lambda (face)
+                   ;; save-match-data is load-bearing: the caller splices on
+                   ;; the match data this lambda would otherwise clobber.
+                   (let ((family (save-match-data
+                                   (when (string-match "KaTeX_[A-Za-z0-9]+" face)
+                                     (match-string 0 face)))))
+                     (if (member family families) face "")))
+                 css t t)))
     (setq css (replace-regexp-in-string
                ",url(fonts/[^)]+\\.\\(?:woff\\|ttf\\)) format(\"[^\"]*\")"
                "" css t t))
     (replace-regexp-in-string
      "url(fonts/\\([^)]+\\.woff2\\))"
      (lambda (m)
-       (let ((uri (org-ppt--katex-font-uri (concat "fonts/" (match-string 1 m)))))
+       (let* ((file (match-string 1 m))
+              (uri (save-match-data
+                     (org-ppt--katex-font-uri (concat "fonts/" file)))))
          (if uri (concat "url(" uri ")") m)))
      css t t)))
 
@@ -259,6 +356,68 @@ has its final size before any slide is measured."
           "<script>\n" (org-ppt--katex-asset "auto-render.min.js") "\n</script>\n"
           "<script>renderMathInElement(document.body,"
           "{throwOnError:false,errorColor:\"#B4232C\"});</script>\n"))
+
+(defun org-ppt--math-source (value)
+  "Split a LaTeX fragment VALUE into its source and whether it is display math.
+Returns a cons of the delimiter-free source and the display flag."
+  (let ((body "\\(\\(?:.\\|\n\\)*\\)"))
+    (cond
+     ((string-match (concat "\\`\\$\\$" body "\\$\\$\\'") value)
+      (cons (match-string 1 value) t))
+     ((string-match (concat "\\`\\\\\\[" body "\\\\\\]\\'") value)
+      (cons (match-string 1 value) t))
+     ((string-match (concat "\\`\\\\(" body "\\\\)\\'") value)
+      (cons (match-string 1 value) nil))
+     ((string-match (concat "\\`\\$" body "\\$\\'") value)
+      (cons (match-string 1 value) nil))
+     (t (cons value nil)))))
+
+(defun org-ppt--math-placeholder (tex display fallback)
+  "Queue TEX for rendering and return the marker standing in for it.
+DISPLAY says whether it is display math and FALLBACK is what to emit if
+the render never happens.  The whole deck's math goes to KaTeX in one
+call at the end, so the marker is what the body carries until then."
+  (push (list tex display fallback) org-ppt--math-queue)
+  (format "<!--org-ppt-math:%d-->" (1- (length org-ppt--math-queue))))
+
+(defun org-ppt--render-math-queue ()
+  "Render the queued math with Node, newest-first order reversed.
+Returns the list of HTML strings, or nil when Node or KaTeX could not
+produce one for every entry — in which case the caller ships the runtime."
+  (let* ((items (reverse org-ppt--math-queue))
+         (script (expand-file-name "render.js" (org-ppt--katex-directory)))
+         (payload (json-encode
+                   `((items . ,(mapcar (lambda (entry)
+                                         `((tex . ,(nth 0 entry))
+                                           (display . ,(if (nth 1 entry) t :json-false))))
+                                       items))))))
+    (when (file-readable-p script)
+      (with-temp-buffer
+        (let ((status (condition-case err
+                          (call-process-region payload nil org-ppt-node-program
+                                               nil t nil script)
+                        (error (message "org-ppt: %s" (error-message-string err))
+                               nil))))
+          (when (eq status 0)
+            (let* ((reply (ignore-errors
+                            (json-read-from-string (buffer-string))))
+                   (error-text (cdr (assq 'error reply)))
+                   (html (append (cdr (assq 'html reply)) nil)))
+              (cond (error-text (message "org-ppt: KaTeX: %s" error-text) nil)
+                    ((= (length html) (length items)) html)
+                    (t nil)))))))))
+
+(defun org-ppt--substitute-math (contents html)
+  "Replace the math markers in CONTENTS with HTML, or with their fallbacks.
+HTML is nil when pre-rendering failed, which puts the original delimiters
+back so the shipped runtime can typeset them in the browser instead."
+  (let ((entries (reverse org-ppt--math-queue)))
+    (replace-regexp-in-string
+     "<!--org-ppt-math:\\([0-9]+\\)-->"
+     (lambda (marker)
+       (let ((n (string-to-number (match-string 1 marker))))
+         (or (nth n html) (nth 2 (nth n entries)) "")))
+     contents t t)))
 
 (defun org-ppt--katex-p (info)
   "Return non-nil when this deck needs the bundled KaTeX runtime.
@@ -323,13 +482,17 @@ was left in pass-through mode by `#+OPTIONS: tex:'."
     (replace-regexp-in-string
      "\\(<img\\|<source\\|<embed\\)\\([^>]*?\\)\\bsrc=\"\\([^\"]+\\)\""
      (lambda (m)
-       (let ((url (match-string 3 m)))
+       ;; Read every group before doing work: `org-ppt--data-uri' matches on
+       ;; the path, and the caller splices on the match data it would leave
+       ;; behind.
+       (let ((prefix (match-string 1 m))
+             (middle (match-string 2 m))
+             (url (match-string 3 m)))
          (if (string-match-p "\\`\\(data:\\|https?:\\|//\\)" url)
              m
-           (let ((uri (org-ppt--data-uri url info)))
+           (let ((uri (save-match-data (org-ppt--data-uri url info))))
              (if uri
-                 (concat (match-string 1 m) (match-string 2 m)
-                         "src=\"" uri "\"")
+                 (concat prefix middle "src=\"" uri "\"")
                m)))))
      html t t)))
 
@@ -455,15 +618,32 @@ Returns a cons of the cleaned body and the concatenated notes."
   "Transcode PARAGRAPH, embedding any images it wraps."
   (org-ppt--embed-sources (org-html-paragraph paragraph contents info) info))
 
+(defun org-ppt--prerendering-p (info)
+  "Return non-nil when math in this export is typeset at export time.
+INFO is the export communication channel; `#+OPTIONS: tex:nil' still wins."
+  (and org-ppt--math-prerender (plist-get info :with-latex)))
+
 (defun org-ppt-latex-fragment (fragment _contents info)
   "Transcode a LaTeX FRAGMENT, embedding the image it renders to."
   (setq org-ppt--math-seen t)
-  (org-ppt--embed-sources (org-html-latex-fragment fragment nil info) info))
+  (if (org-ppt--prerendering-p info)
+      (let* ((source (org-ppt--math-source
+                      (org-element-property :value fragment)))
+             (tex (car source))
+             (display (cdr source)))
+        (org-ppt--math-placeholder
+         tex display (format (if display "\\[%s\\]" "\\(%s\\)") tex)))
+    (org-ppt--embed-sources (org-html-latex-fragment fragment nil info) info)))
 
 (defun org-ppt-latex-environment (environment _contents info)
   "Transcode a LaTeX ENVIRONMENT, embedding the image it renders to."
   (setq org-ppt--math-seen t)
-  (org-ppt--embed-sources (org-html-latex-environment environment nil info) info))
+  (if (org-ppt--prerendering-p info)
+      ;; KaTeX reads \begin{…}…\end{…} directly, so the environment is its
+      ;; own source and its own fallback.
+      (let ((value (org-element-property :value environment)))
+        (org-ppt--math-placeholder value t value))
+    (org-ppt--embed-sources (org-html-latex-environment environment nil info) info)))
 
 (defun org-ppt--fragment-list-p (element info)
   "Non-nil when ELEMENT is a plain list that should be revealed stepwise."
@@ -602,10 +782,21 @@ Returns a cons of the cleaned body and the concatenated notes."
 
 (defun org-ppt-template (contents info)
   "Return the complete, self-contained HTML document around CONTENTS."
-  (let ((title (org-export-data (plist-get info :title) info))
-        (theme (if (equal (plist-get info :ppt-theme) "dark") "dark" "light"))
-        (lang (or (plist-get info :language) "en"))
-        (author (org-export-data (plist-get info :author) info)))
+  (let* ((rendered (and org-ppt--math-queue (org-ppt--render-math-queue)))
+         (contents (if org-ppt--math-queue
+                       (org-ppt--substitute-math contents rendered)
+                     contents))
+         ;; Pre-rendered math needs the stylesheet but no runtime, and only
+         ;; the faces it actually reached for.  Everything else that carries
+         ;; math needs the runtime and, not knowing what it will draw, the
+         ;; whole family set.
+         (families (and rendered (org-ppt--katex-families-used contents)))
+         (runtime (and (not rendered) (org-ppt--katex-p info)))
+         (styled (or rendered runtime))
+         (title (org-export-data (plist-get info :title) info))
+         (theme (if (equal (plist-get info :ppt-theme) "dark") "dark" "light"))
+         (lang (or (plist-get info :language) "en"))
+         (author (org-export-data (plist-get info :author) info)))
     (concat
      "<!DOCTYPE html>\n"
      (format "<html lang=\"%s\" data-theme=\"%s\">\n" lang theme)
@@ -622,14 +813,14 @@ Returns a cons of the cleaned body and the concatenated notes."
                  "Presentation"
                (org-ppt--strip-tags title)))
      "<style>\n" (org-ppt--asset "org-ppt.css") "\n</style>\n"
-     (if (org-ppt--katex-p info)
-         (concat "<style>\n" (org-ppt--katex-css) "\n</style>\n")
+     (if styled
+         (concat "<style>\n" (org-ppt--katex-css families) "\n</style>\n")
        "")
      (org-ppt--accent-style info)
      "</head>\n<body>\n"
      contents
      (org-ppt--chrome-template info)
-     (if (org-ppt--katex-p info) (org-ppt--katex-scripts) "")
+     (if runtime (org-ppt--katex-scripts) "")
      "<script>\n" (org-ppt--asset "org-ppt.js") "\n</script>\n"
      "</body>\n</html>\n")))
 
@@ -709,7 +900,11 @@ rendering math with the bundled KaTeX instead" mode missing)
           (org-html-container-element "div")
           (org-html-self-link-headlines nil)
           (org-ppt--math-seen nil)
+          (org-ppt--math-queue nil)
           (org-ppt--math-mode (org-ppt--resolved-latex))
+          (org-ppt--math-prerender (and (eq org-ppt--math-mode 'katex)
+                                        (executable-find org-ppt-node-program)
+                                        t))
           ;; KaTeX consumes the same pass-through Org emits for MathJax:
           ;; \(…\) and raw \begin{…} environments, which are already the
           ;; delimiters auto-render looks for.  No CDN reaches the deck

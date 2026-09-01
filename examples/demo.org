@@ -87,8 +87,8 @@ display equation gets its own line:
 t_{\text{setup}} + t_{\text{logic}} + t_{\text{skew}} \le T_{\text{clk}}
 \end{equation}
 
-KaTeX ships inside =org-ppt= and is inlined into the deck, so this renders on
-a machine with no LaTeX installed and no network connection.
+KaTeX ships inside =org-ppt=. This slide was typeset at export time, so it
+carries no script and no LaTeX, and renders offline on any machine.
 
 ** Two columns
 

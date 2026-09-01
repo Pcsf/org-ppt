@@ -316,12 +316,76 @@ result proves the rewrite ran rather than that the pattern went stale."
     (should-not (string-match-p "url(fonts/" css))
     (should-not (string-match-p "truetype" css))))
 
-(ert-deftest org-ppt-test-math-deck-carries-katex ()
-  "A deck with math inlines the runtime and keeps Org's pass-through form."
+(ert-deftest org-ppt-test-math-deck-is-prerendered ()
+  "With Node present the deck ships typeset math and no runtime."
+  (skip-unless (executable-find org-ppt-node-program))
   (org-ppt-test--with-deck "* S\nThe relation $E=mc^2$ holds.\n"
-    (should (string-match-p "renderMathInElement" html))
-    (should (string-match-p (regexp-quote "\\(E=mc^2\\)") html))
-    (should (string-match-p "data:font/woff2;base64," html))))
+    (should (string-match-p "class=\"katex" html))
+    (should (string-match-p "data:font/woff2;base64," html))
+    (should-not (string-match-p "renderMathInElement" html))
+    (should-not (string-match-p "org-ppt-math:" html))))
+
+(ert-deftest org-ppt-test-math-deck-falls-back-to-the-runtime ()
+  "Without Node the deck ships the runtime and Org's pass-through form."
+  (let ((org-ppt-node-program "org-ppt-no-such-node"))
+    (org-ppt-test--with-deck "* S\nThe relation $E=mc^2$ holds.\n"
+      (should (string-match-p "renderMathInElement" html))
+      (should (string-match-p (regexp-quote "\\(E=mc^2\\)") html))
+      (should (string-match-p "data:font/woff2;base64," html))
+      (should-not (string-match-p "org-ppt-math:" html)))))
+
+(ert-deftest org-ppt-test-prerendered-deck-carries-fewer-faces ()
+  "Typesetting at export time is what lets the deck drop unused faces."
+  (skip-unless (executable-find org-ppt-node-program))
+  (let (small)
+    (org-ppt-test--with-deck "* S\nThe relation $E=mc^2$ holds.\n"
+      (setq small (org-ppt-test--count "data:font/woff2" html)))
+    (let ((org-ppt-node-program "org-ppt-no-such-node"))
+      (org-ppt-test--with-deck "* S\nThe relation $E=mc^2$ holds.\n"
+        (should (= 20 (org-ppt-test--count "data:font/woff2" html)))
+        (should (< small 20))))))
+
+(ert-deftest org-ppt-test-math-source-splits-every-delimiter ()
+  "Each delimiter pair yields its source and the right display flag."
+  (should (equal '("x" . nil) (org-ppt--math-source "$x$")))
+  (should (equal '("x" . t) (org-ppt--math-source "$$x$$")))
+  (should (equal '("x" . nil) (org-ppt--math-source "\\(x\\)")))
+  (should (equal '("x" . t) (org-ppt--math-source "\\[x\\]")))
+  (should (equal '("a\nb" . t) (org-ppt--math-source "$$a\nb$$"))))
+
+(ert-deftest org-ppt-test-selector-targets-its-rightmost-compound ()
+  "`.katex .mathnormal' selects mathnormal, not everything under .katex.
+Reading the whole selector once made every element match every rule, so
+every face was kept and the subset saved nothing."
+  (should (equal '("mathnormal") (org-ppt--selector-classes ".katex .mathnormal")))
+  (should (equal '("delimsizing" "size4")
+                 (org-ppt--selector-classes ".katex .delimsizing.size4")))
+  (should (equal '("katex") (org-ppt--selector-classes ".katex")))
+  ;; A bare tag on the right falls back to the nearest classed compound.
+  (should (equal '("delim-size1")
+                 (org-ppt--selector-classes ".katex .delim-size1>span"))))
+
+(ert-deftest org-ppt-test-font-detection-is-driven-by-the-classes-present ()
+  "Only the faces the rendered math reaches for are reported."
+  (should (equal '("KaTeX_Main")
+                 (org-ppt--katex-families-used "<span class=\"katex\"></span>")))
+  (let ((used (org-ppt--katex-families-used
+               "<span class=\"katex\"><span class=\"mord mathnormal\"></span></span>")))
+    (should (member "KaTeX_Math" used))
+    (should (member "KaTeX_Main" used))
+    (should-not (member "KaTeX_Fraktur" used))))
+
+(ert-deftest org-ppt-test-katex-css-subset-keeps-only-what-was-asked ()
+  "Subsetting drops the other families and leaves the stylesheet intact.
+The full sheet is measured alongside, so a subset that quietly kept
+everything, or one that corrupted the sheet while rewriting it, fails."
+  (let ((all (org-ppt--katex-css))
+        (sub (org-ppt--katex-css '("KaTeX_Main" "KaTeX_Math"))))
+    (should (= 20 (org-ppt-test--count "@font-face" all)))
+    (should (= 6 (org-ppt-test--count "@font-face" sub)))
+    (should (< (length sub) (length all)))
+    (should (string-match-p "KaTeX_Math" sub))
+    (should-not (string-match-p "@font-face{font-family:KaTeX_Fraktur" sub))))
 
 (ert-deftest org-ppt-test-math-free-deck-carries-no-katex ()
   "A deck without math pays nothing for the math feature."

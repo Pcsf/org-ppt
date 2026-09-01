@@ -53,6 +53,25 @@ Every image mode is checked against the full program list Org declares for it in
 =org-preview-latex-process-alist=. When one is absent, the export says which
 binary is missing and renders with KaTeX instead of failing part-way through.
 
+*** File size
+
+KaTeX mode has two paths, and both produce the same page.
+
+When =node= is on PATH, org-ppt typesets the math itself at export time and the
+deck carries finished HTML plus only the font faces that math reached for.
+Nothing runs in the browser. A deck using ordinary symbols carries six faces.
+
+When =node= is absent, the deck carries the KaTeX runtime and all twenty faces,
+because an exporter that cannot see the typeset output cannot know which faces
+to drop, and a missing face degrades silently to a system serif rather than
+failing loudly. Set =org-ppt-node-program= if node lives somewhere unusual.
+
+| Path                | Deck with one equation |
+|---------------------+------------------------|
+| pre-rendered        | ~220 KB                |
+| runtime fallback    | ~680 KB                |
+| no math at all      | ~35 KB                 |
+
 ** Loading the package
 
 Clone it, then point Emacs at the directory. =org-ppt.el= locates its own
