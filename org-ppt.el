@@ -34,7 +34,7 @@
 ;; Quick start:
 ;;
 ;;   (require 'org-ppt)
-;;   ;; In an Org buffer:  C-c C-e P o   (export and open in the browser)
+;;   ;; In an Org buffer:  C-c C-e s o   (export and open in the browser)
 ;;
 ;; Each headline at `org-ppt-slide-level' (1 by default) becomes a slide.
 ;; Headlines above that level become full-bleed section dividers.  Deeper
@@ -828,8 +828,8 @@ INFO is the export communication channel; `#+OPTIONS: tex:nil' still wins."
 
 (org-export-define-derived-backend 'ppt 'html
   :menu-entry
-  '(?P "Export to presentation HTML"
-       ((?P "As HTML file" org-ppt-export-to-html)
+  '(?s "Export to presentation slides"
+       ((?s "As HTML file" org-ppt-export-to-html)
         (?o "As HTML file and open" org-ppt-export-to-html-and-open)
         (?b "As buffer" org-ppt-export-as-html)))
   :options-alist

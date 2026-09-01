@@ -96,9 +96,9 @@ From any Org buffer, =C-c C-e= opens the export dispatcher. =P= is org-ppt:
 
 | Key       | Command                          | Result                        |
 |-----------+----------------------------------+-------------------------------|
-| =C-c C-e P P= | =org-ppt-export-to-html=     | writes =<name>.html=          |
-| =C-c C-e P o= | =org-ppt-export-to-html-and-open= | writes it and opens a browser |
-| =C-c C-e P b= | =org-ppt-export-as-html=     | renders into a scratch buffer |
+| =C-c C-e s s= | =org-ppt-export-to-html=     | writes =<name>.html=          |
+| =C-c C-e s o= | =org-ppt-export-to-html-and-open= | writes it and opens a browser |
+| =C-c C-e s b= | =org-ppt-export-as-html=     | renders into a scratch buffer |
 
 From a shell or a Makefile:
 
