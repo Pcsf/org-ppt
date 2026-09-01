@@ -21,15 +21,37 @@ The exporter itself needs nothing beyond Emacs and Org.
 | GNU Emacs  | ≥ 27.1  | yes               | the package                                       |
 | Org mode   | ≥ 9.3   | yes               | =ox-html=, which this backend derives from        |
 | =htmlize=  | ≥ 1.34  | no                | syntax colours in =#+BEGIN_SRC= blocks            |
-| LaTeX + =dvipng= | any | no             | rendering =$math$= to embedded images             |
+| LaTeX + =dvipng= | any | no             | math as images, instead of the bundled KaTeX      |
 | A browser  | any     | to present        | Chromium, Firefox and WebKit are all fine         |
 
+Math needs nothing installed. KaTeX 0.16.22 ships in =assets/katex= under its
+MIT licence, and a deck containing math carries the stylesheet, the runtime and
+the woff2 faces inlined, so equations typeset from =file://= with the network
+unplugged. A deck without math carries none of it and is byte-identical to one
+exported before the feature existed.
+
 Without =htmlize=, source blocks still export — as plain monospaced text.
-Without LaTeX, math falls back to verbatim and a message says so. Neither is
-an error, and neither breaks an export.
 
 Developing this repo additionally uses =make= and =chromium= (headless
 screenshots in =make verify=).
+
+** Math
+
+Write math the way Org already wants it: =$E=mc^2$= or =\(E=mc^2\)= inline,
+=\begin{equation}…\end{equation}= for a display equation. =org-ppt-with-latex=
+picks how it is rendered.
+
+| Value          | Renders math as                 | Needs                        |
+|----------------+---------------------------------+------------------------------|
+| =katex=        | browser-typeset, fonts inlined  | nothing — the default        |
+| =dvipng=       | embedded PNG images             | =latex= and =dvipng=         |
+| =dvisvgm=      | embedded SVG images             | =latex= and =dvisvgm=        |
+| =imagemagick=  | embedded images                 | =latex= and =convert=        |
+| =verbatim=     | the LaTeX source, as typed      | nothing                      |
+
+Every image mode is checked against the full program list Org declares for it in
+=org-preview-latex-process-alist=. When one is absent, the export says which
+binary is missing and renders with KaTeX instead of failing part-way through.
 
 ** Loading the package
 

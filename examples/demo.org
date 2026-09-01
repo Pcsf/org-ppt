@@ -78,6 +78,18 @@ end process;
 | Presentation | Browser   | fullscreen deck |
 | Handout      | Ctrl+P    | PDF, 1 page/slide |
 
+** Math needs no TeX
+
+Inline math like $f_{\max} = 1/t_{\text{clk}}$ sits in the sentence, and a
+display equation gets its own line:
+
+\begin{equation}
+t_{\text{setup}} + t_{\text{logic}} + t_{\text{skew}} \le T_{\text{clk}}
+\end{equation}
+
+KaTeX ships inside =org-ppt= and is inlined into the deck, so this renders on
+a machine with no LaTeX installed and no network connection.
+
 ** Two columns
 
 #+BEGIN_COLUMNS

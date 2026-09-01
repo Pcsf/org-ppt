@@ -72,6 +72,7 @@
 (require 'ox-html)
 (require 'cl-lib)
 (require 'subr-x)
+(require 'seq)
 
 (defgroup org-ppt nil
   "Export Org files to self-contained HTML slide decks."
@@ -150,14 +151,18 @@ Leaving this nil and marking individual lists with
   :type 'boolean
   :group 'org-ppt)
 
-(defcustom org-ppt-with-latex 'dvipng
+(defcustom org-ppt-with-latex 'katex
   "How LaTeX fragments are rendered.
-Defaults to `dvipng', which produces images that get embedded like any
-other image and so keep the deck self-contained.  MathJax is
-deliberately not the default because it needs a CDN at display time.
-Downgraded automatically to `verbatim' when no LaTeX is installed."
-  :type '(choice (const dvipng) (const imagemagick) (const verbatim)
-                 (const :tag "MathJax (needs network)" t))
+Defaults to `katex', which typesets math in the browser from the KaTeX
+copy bundled in assets/katex and inlined into the deck, so math needs no
+TeX installation and still costs no network at display time.  The
+image-rendering processes from `org-preview-latex-process-alist' are
+available for decks that would rather have math as pictures; each falls
+back to `katex' when its toolchain is incomplete.  MathJax is
+deliberately not offered because it needs a CDN at display time."
+  :type '(choice (const :tag "KaTeX, bundled and inlined" katex)
+                 (const dvipng) (const dvisvgm) (const imagemagick)
+                 (const verbatim))
   :group 'org-ppt)
 
 (defcustom org-ppt-browser-function #'browse-url
@@ -194,6 +199,75 @@ Downgraded automatically to `verbatim' when no LaTeX is installed."
     (with-temp-buffer
       (insert-file-contents path)
       (buffer-string))))
+
+;;;; Bundled KaTeX
+
+(defvar org-ppt--math-mode nil
+  "Resolved value of `org-ppt-with-latex' for the export in progress.")
+
+(defvar org-ppt--math-seen nil
+  "Non-nil once the export in progress has transcoded a math fragment.
+Gates the KaTeX payload, so a deck without math carries none of it.")
+
+(defun org-ppt--katex-directory ()
+  "Return the directory holding the bundled KaTeX distribution."
+  (expand-file-name "katex" (org-ppt--asset-directory)))
+
+(defun org-ppt--katex-asset (name)
+  "Return bundled KaTeX file NAME as a string."
+  (let ((path (expand-file-name name (org-ppt--katex-directory))))
+    (unless (file-readable-p path)
+      (error "org-ppt: missing KaTeX asset %s (looked in %s)"
+             name (org-ppt--katex-directory)))
+    (with-temp-buffer
+      (insert-file-contents path)
+      (buffer-string))))
+
+(defun org-ppt--katex-font-uri (file)
+  "Return bundled KaTeX font FILE as a base64 data URI, or nil if unreadable."
+  (let ((path (expand-file-name file (org-ppt--katex-directory))))
+    (when (file-readable-p path)
+      (concat "data:font/woff2;base64,"
+              (base64-encode-string
+               (with-temp-buffer
+                 (set-buffer-multibyte nil)
+                 (insert-file-contents-literally path)
+                 (buffer-string))
+               t)))))
+
+(defun org-ppt--katex-css ()
+  "Return the KaTeX stylesheet with every font face inlined.
+Upstream lists woff2, woff and ttf for each face.  Only woff2 is bundled
+and inlined; the other two are dropped rather than left as broken
+relative URLs, since any browser that can run the deck reads woff2."
+  (let ((css (org-ppt--katex-asset "katex.min.css")))
+    (setq css (replace-regexp-in-string
+               ",url(fonts/[^)]+\\.\\(?:woff\\|ttf\\)) format(\"[^\"]*\")"
+               "" css t t))
+    (replace-regexp-in-string
+     "url(fonts/\\([^)]+\\.woff2\\))"
+     (lambda (m)
+       (let ((uri (org-ppt--katex-font-uri (concat "fonts/" (match-string 1 m)))))
+         (if uri (concat "url(" uri ")") m)))
+     css t t)))
+
+(defun org-ppt--katex-scripts ()
+  "Return the KaTeX runtime and the call that typesets the deck.
+Emitted at the end of the body, before the presentation runtime, so math
+has its final size before any slide is measured."
+  (concat "<script>\n" (org-ppt--katex-asset "katex.min.js") "\n</script>\n"
+          "<script>\n" (org-ppt--katex-asset "auto-render.min.js") "\n</script>\n"
+          "<script>renderMathInElement(document.body,"
+          "{throwOnError:false,errorColor:\"#B4232C\"});</script>\n"))
+
+(defun org-ppt--katex-p (info)
+  "Return non-nil when this deck needs the bundled KaTeX runtime.
+INFO is the export communication channel.  Requires that KaTeX is the
+resolved mode, that the document actually contained math, and that Org
+was left in pass-through mode by `#+OPTIONS: tex:'."
+  (and (eq org-ppt--math-mode 'katex)
+       org-ppt--math-seen
+       (eq (plist-get info :with-latex) 'mathjax)))
 
 ;;;; Data URIs
 
@@ -383,10 +457,12 @@ Returns a cons of the cleaned body and the concatenated notes."
 
 (defun org-ppt-latex-fragment (fragment _contents info)
   "Transcode a LaTeX FRAGMENT, embedding the image it renders to."
+  (setq org-ppt--math-seen t)
   (org-ppt--embed-sources (org-html-latex-fragment fragment nil info) info))
 
 (defun org-ppt-latex-environment (environment _contents info)
   "Transcode a LaTeX ENVIRONMENT, embedding the image it renders to."
+  (setq org-ppt--math-seen t)
   (org-ppt--embed-sources (org-html-latex-environment environment nil info) info))
 
 (defun org-ppt--fragment-list-p (element info)
@@ -546,10 +622,14 @@ Returns a cons of the cleaned body and the concatenated notes."
                  "Presentation"
                (org-ppt--strip-tags title)))
      "<style>\n" (org-ppt--asset "org-ppt.css") "\n</style>\n"
+     (if (org-ppt--katex-p info)
+         (concat "<style>\n" (org-ppt--katex-css) "\n</style>\n")
+       "")
      (org-ppt--accent-style info)
      "</head>\n<body>\n"
      contents
      (org-ppt--chrome-template info)
+     (if (org-ppt--katex-p info) (org-ppt--katex-scripts) "")
      "<script>\n" (org-ppt--asset "org-ppt.js") "\n</script>\n"
      "</body>\n</html>\n")))
 
@@ -593,27 +673,50 @@ Returns a cons of the cleaned body and the concatenated notes."
 
 ;;;; Export commands
 
+(defun org-ppt--latex-programs (process)
+  "Return the programs Org declares for PROCESS, or nil when it knows none."
+  (plist-get (cdr (assq process org-preview-latex-process-alist)) :programs))
+
+(defun org-ppt--missing-latex-program (process)
+  "Return the first program PROCESS needs that is not on PATH."
+  (seq-find (lambda (program) (not (executable-find program)))
+            (org-ppt--latex-programs process)))
+
 (defun org-ppt--resolved-latex ()
-  "Return `org-ppt-with-latex', downgraded when LaTeX is unavailable."
-  (if (and (memq org-ppt-with-latex '(dvipng imagemagick))
-           (not (executable-find "latex")))
-      (progn
-        (message "org-ppt: no latex found, rendering math verbatim")
-        'verbatim)
-    org-ppt-with-latex))
+  "Return `org-ppt-with-latex', downgraded when its toolchain is incomplete.
+Every image-rendering process needs more than one binary — `dvipng' also
+needs dvipng, `imagemagick' also needs convert — so the whole program
+list Org declares is probed, and the one that is absent is named."
+  (let ((mode org-ppt-with-latex))
+    (if (not (assq mode org-preview-latex-process-alist))
+        mode
+      (let ((missing (org-ppt--missing-latex-program mode)))
+        (if (not missing)
+            mode
+          (message "org-ppt: %s needs `%s', which is not installed; \
+rendering math with the bundled KaTeX instead" mode missing)
+          'katex)))))
 
 (defmacro org-ppt--with-export-settings (&rest body)
   "Run BODY with the HTML settings a self-contained deck requires."
   (declare (indent 0) (debug t))
-  `(let ((org-html-htmlize-output-type 'css)
-         (org-html-head-include-default-style nil)
-         (org-html-head-include-scripts nil)
-         (org-html-validation-link nil)
-         (org-html-doctype "html5")
-         (org-html-html5-fancy t)
-         (org-html-container-element "div")
-         (org-html-self-link-headlines nil)
-         (org-ppt-with-latex (org-ppt--resolved-latex)))
+  `(let* ((org-html-htmlize-output-type 'css)
+          (org-html-head-include-default-style nil)
+          (org-html-head-include-scripts nil)
+          (org-html-validation-link nil)
+          (org-html-doctype "html5")
+          (org-html-html5-fancy t)
+          (org-html-container-element "div")
+          (org-html-self-link-headlines nil)
+          (org-ppt--math-seen nil)
+          (org-ppt--math-mode (org-ppt--resolved-latex))
+          ;; KaTeX consumes the same pass-through Org emits for MathJax:
+          ;; \(…\) and raw \begin{…} environments, which are already the
+          ;; delimiters auto-render looks for.  No CDN reaches the deck
+          ;; because `org-ppt-template' replaces `org-html-template'.
+          (org-ppt-with-latex (if (eq org-ppt--math-mode 'katex)
+                                  'mathjax
+                                org-ppt--math-mode)))
      ,@body))
 
 ;;;###autoload

@@ -255,6 +255,93 @@ Org source, which is what the data-URI code resolves against."
   (should-not (org-ppt--mime-type "d.exe"))
   (should-not (org-ppt--mime-type "noext")))
 
-(provide 'org-ppt-test)
+
+;;;; Math
+
+(defconst org-ppt-test--absent "org-ppt-no-such-program"
+  "A program name that is guaranteed not to be on PATH.")
+
+(defun org-ppt-test--messages-of (fn)
+  "Call FN and return everything it wrote to the message log."
+  (with-current-buffer (messages-buffer)
+    (let ((start (point-max)))
+      (funcall fn)
+      (buffer-substring-no-properties start (point-max)))))
+
+(ert-deftest org-ppt-test-latex-probe-checks-every-program ()
+  "A process whose second program is missing is not treated as available.
+Probing only the first binary let a machine carrying TeX but not dvipng
+reach the renderer and fail there instead of degrading."
+  (let ((org-ppt-with-latex 'dvipng)
+        (org-preview-latex-process-alist
+         `((dvipng :programs ("sh" ,org-ppt-test--absent)))))
+    (should (equal org-ppt-test--absent (org-ppt--missing-latex-program 'dvipng)))
+    (should (eq 'katex (org-ppt--resolved-latex)))))
+
+(ert-deftest org-ppt-test-latex-probe-keeps-a-complete-toolchain ()
+  "A process with every program present is used as configured."
+  (let ((org-ppt-with-latex 'dvipng)
+        (org-preview-latex-process-alist '((dvipng :programs ("sh" "ls")))))
+    (should-not (org-ppt--missing-latex-program 'dvipng))
+    (should (eq 'dvipng (org-ppt--resolved-latex)))))
+
+(ert-deftest org-ppt-test-latex-downgrade-names-the-missing-program ()
+  "The downgrade says which binary is absent, never just that math broke."
+  (let* ((org-ppt-with-latex 'imagemagick)
+         (org-preview-latex-process-alist
+          `((imagemagick :programs (,org-ppt-test--absent))))
+         (log (org-ppt-test--messages-of #'org-ppt--resolved-latex)))
+    (should (string-match-p (regexp-quote org-ppt-test--absent) log))
+    (should (string-match-p "imagemagick" log))))
+
+(ert-deftest org-ppt-test-non-process-modes-pass-through ()
+  "Modes that render nothing themselves are never probed for binaries."
+  (dolist (mode '(katex verbatim))
+    (let ((org-ppt-with-latex mode))
+      (should (eq mode (org-ppt--resolved-latex))))))
+
+(ert-deftest org-ppt-test-katex-is-the-default ()
+  "Math works on a machine with no TeX, with no configuration."
+  (should (eq 'katex (default-value 'org-ppt-with-latex))))
+
+(ert-deftest org-ppt-test-katex-css-is-self-contained ()
+  "Font faces are inlined, and the relative fallbacks are dropped.
+The bundled stylesheet is asserted to carry the pattern first, so a clean
+result proves the rewrite ran rather than that the pattern went stale."
+  (let ((raw (org-ppt--katex-asset "katex.min.css"))
+        (css (org-ppt--katex-css)))
+    (should (string-match-p "url(fonts/" raw))
+    (should (string-match-p "truetype" raw))
+    (should (string-match-p "data:font/woff2;base64," css))
+    (should-not (string-match-p "url(fonts/" css))
+    (should-not (string-match-p "truetype" css))))
+
+(ert-deftest org-ppt-test-math-deck-carries-katex ()
+  "A deck with math inlines the runtime and keeps Org's pass-through form."
+  (org-ppt-test--with-deck "* S\nThe relation $E=mc^2$ holds.\n"
+    (should (string-match-p "renderMathInElement" html))
+    (should (string-match-p (regexp-quote "\\(E=mc^2\\)") html))
+    (should (string-match-p "data:font/woff2;base64," html))))
+
+(ert-deftest org-ppt-test-math-free-deck-carries-no-katex ()
+  "A deck without math pays nothing for the math feature."
+  (org-ppt-test--with-deck "* S\nPlain prose only.\n"
+    (should-not (string-match-p "renderMathInElement" html))
+    (should-not (string-match-p "data:font/woff2" html))))
+
+(ert-deftest org-ppt-test-deck-references-no-remote-asset ()
+  "Nothing in an exported deck is fetched over the network.
+Each pattern is shown matching a planted positive, so an empty result
+means the deck is clean rather than that the pattern stopped working."
+  (let ((planted (concat "<link rel=\"stylesheet\" href=\"https://cdn/x.css\">"
+                         "<script src=\"https://cdn/x.js\"></script>"
+                         "<img src=\"https://cdn/x.png\">")))
+    (should (string-match-p "<link[^>]*href=\"http" planted))
+    (should (string-match-p "<script[^>]*src=" planted))
+    (should (string-match-p "src=\"http" planted)))
+  (org-ppt-test--with-deck "* S\nThe relation $E=mc^2$ holds.\n"
+    (should-not (string-match-p "<link[^>]*href=\"http" html))
+    (should-not (string-match-p "<script[^>]*src=" html))
+    (should-not (string-match-p "src=\"http" html))))
 
 ;;; org-ppt-test.el ends here
