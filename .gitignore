@@ -1,0 +1,8 @@
+*.elc
+build/
+examples/demo.html
+examples/ltximg/
+auto-save-list/
+*~
+\#*\#
+.\#*

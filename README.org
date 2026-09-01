@@ -1,0 +1,273 @@
+#+TITLE: org-ppt — Org files as PowerPoint-style presentations
+#+OPTIONS: toc:2 num:nil
+
+Write the talk as an Org file in Emacs. Export it. You get *one* =.html= file
+that opens in any browser and presents like a PowerPoint slide show — arrow
+keys, fullscreen, slide overview, speaker notes with a timer, and =Ctrl+P= for
+a one-page-per-slide PDF handout.
+
+The output file is fully self-contained. The stylesheet, the runtime and every
+figure are inlined, so the deck works from a USB stick, from an email
+attachment, and from a meeting-room laptop with no network and no Emacs.
+
+* Installation
+
+** Dependencies
+
+The exporter itself needs nothing beyond Emacs and Org.
+
+| Dependency | Version | Required?         | Used for                                          |
+|------------+---------+-------------------+---------------------------------------------------|
+| GNU Emacs  | ≥ 27.1  | yes               | the package                                       |
+| Org mode   | ≥ 9.3   | yes               | =ox-html=, which this backend derives from        |
+| =htmlize=  | ≥ 1.34  | no                | syntax colours in =#+BEGIN_SRC= blocks            |
+| LaTeX + =dvipng= | any | no             | rendering =$math$= to embedded images             |
+| A browser  | any     | to present        | Chromium, Firefox and WebKit are all fine         |
+
+Without =htmlize=, source blocks still export — as plain monospaced text.
+Without LaTeX, math falls back to verbatim and a message says so. Neither is
+an error, and neither breaks an export.
+
+Developing this repo additionally uses =make= and =chromium= (headless
+screenshots in =make verify=).
+
+** Loading the package
+
+Clone it, then point Emacs at the directory. =org-ppt.el= locates its own
+=assets/= folder relative to itself, so keep the two together.
+
+#+BEGIN_SRC emacs-lisp
+(add-to-list 'load-path "~/Documents/10-repos/11-gitRepo/emacs-lisp/org-ppt")
+(require 'org-ppt)
+#+END_SRC
+
+With =use-package=:
+
+#+BEGIN_SRC emacs-lisp
+(use-package org-ppt
+  :load-path "~/Documents/10-repos/11-gitRepo/emacs-lisp/org-ppt"
+  :after org)
+#+END_SRC
+
+* Usage
+
+From any Org buffer, =C-c C-e= opens the export dispatcher. =P= is org-ppt:
+
+| Key       | Command                          | Result                        |
+|-----------+----------------------------------+-------------------------------|
+| =C-c C-e P P= | =org-ppt-export-to-html=     | writes =<name>.html=          |
+| =C-c C-e P o= | =org-ppt-export-to-html-and-open= | writes it and opens a browser |
+| =C-c C-e P b= | =org-ppt-export-as-html=     | renders into a scratch buffer |
+
+From a shell or a Makefile:
+
+#+BEGIN_SRC sh
+emacs -Q --batch -L /path/to/org-ppt -l org-ppt \
+      --eval '(org-ppt-export-to-html-file "talk.org")'
+#+END_SRC
+
+* Writing a deck
+
+** Slides
+
+A headline at =org-ppt-slide-level= — level 1 by default — becomes a slide.
+Headlines *above* that level become full-bleed section dividers. Headlines
+*below* it are ordinary headings inside the current slide.
+
+#+BEGIN_EXAMPLE
+,#+ORG_PPT_SLIDE_LEVEL: 2
+
+,* Part one            <- a section divider slide
+,** First point        <- a slide
+,*** A sub-heading     <- a heading inside that slide
+,** Second point       <- another slide
+#+END_EXAMPLE
+
+Leave =ORG_PPT_SLIDE_LEVEL= at 1 and every =*= headline is simply a slide.
+
+** Document keywords
+
+| Keyword                 | Values                   | Default   |
+|-------------------------+--------------------------+-----------|
+| =#+ORG_PPT_THEME=       | =light=, =dark=          | =light=   |
+| =#+ORG_PPT_ACCENT=      | any CSS colour           | =#0F6FC5= |
+| =#+ORG_PPT_ASPECT=      | =16:9=, =4:3=            | =16:9=    |
+| =#+ORG_PPT_TRANSITION=  | =fade=, =slide=, =none=  | =fade=    |
+| =#+ORG_PPT_FOOTER=      | text                     | none      |
+| =#+ORG_PPT_LOGO=        | path to an image         | none      |
+| =#+ORG_PPT_SLIDE_LEVEL= | integer                  | =1=       |
+
+Standard Org options still apply. =#+TITLE=, =#+SUBTITLE=, =#+AUTHOR= and
+=#+DATE= build the opening slide; =#+OPTIONS: toc:t= adds an agenda slide
+listing the sections.
+
+Three org-ppt options ride on =#+OPTIONS=:
+
+| Option        | Meaning                                  | Default |
+|---------------+------------------------------------------+---------|
+| =ppt-title:nil= | suppress the generated title slide     | on      |
+| =ppt-embed:nil= | do not inline images as data URIs      | on      |
+| =ppt-frag:t=    | reveal every list one item at a time   | off     |
+
+** Headline tags and properties
+
+| Marker             | Effect                                                  |
+|--------------------+---------------------------------------------------------|
+| =:section:=        | render this slide as a full-bleed divider               |
+| =:figure:=         | one figure fills the whole slide body                   |
+| =:notes:=          | the subtree is speaker notes, never shown to the room   |
+| =:center:=         | centre the slide body                                   |
+| =:noexport:=       | standard Org — drop the subtree entirely                |
+| =:PPT_CLASS:= prop | extra CSS classes on the generated =<section>=          |
+
+A =:notes:= subtree belongs *under* the slide it annotates.
+
+** Blocks
+
+#+BEGIN_EXAMPLE
+,#+BEGIN_NOTES
+Speaker-only text. Press s while presenting to see it.
+,#+END_NOTES
+
+,#+BEGIN_COLUMNS
+,#+BEGIN_COLUMN
+Left-hand text.
+,#+END_COLUMN
+,#+BEGIN_COLUMN
+[[file:images/diagram.svg]]
+,#+END_COLUMN
+,#+END_COLUMNS
+
+,#+BEGIN_NOTE
+A calm callout box.
+,#+END_NOTE
+
+,#+BEGIN_WARNING
+An emphasised callout box.
+,#+END_WARNING
+
+,#+BEGIN_FRAGMENT
+Revealed on the next key press.
+,#+END_FRAGMENT
+
+,#+BEGIN_CENTER
+Centred content.
+,#+END_CENTER
+
+,#+BEGIN_BIG
+Large statement text.
+,#+END_BIG
+#+END_EXAMPLE
+
+** Building a list one item at a time
+
+#+BEGIN_EXAMPLE
+,#+ATTR_PPT: :fragment t
+- First the problem
+- Then the constraint nobody stated
+- Then the design that falls out of it
+#+END_EXAMPLE
+
+Each press of =Space= reveals the next item. Set =#+OPTIONS: ppt-frag:t= to
+make this the behaviour of every list in the document.
+
+** Figures and graphs
+
+Ordinary Org image links work, and their files are embedded:
+
+#+BEGIN_EXAMPLE
+,#+CAPTION: Measured jitter against supply noise
+[[file:images/jitter.png]]
+#+END_EXAMPLE
+
+PNG, JPEG, GIF, SVG, WebP, AVIF, BMP, ICO and TIFF are embedded. Anything
+generated into a file works too, which covers Graphviz, gnuplot, PlantUML and
+=matplotlib= via Babel — point the =:file= header argument at an image and the
+result lands in the deck.
+
+Give a slide the =:figure:= tag when one image should fill the frame.
+
+* Presenting
+
+| Key                          | Action                                  |
+|------------------------------+-----------------------------------------|
+| =→= =↓= =Space= =PgDn=, click | next step or slide                      |
+| =←= =↑= =PgUp=               | previous step or slide                  |
+| =N= / =P=                    | next / previous slide, skipping steps   |
+| =Home= / =End=               | first / last slide                      |
+| digits then =Enter=          | jump to that slide number               |
+| =O= or =Esc=                 | slide overview                          |
+| =F=                          | fullscreen                              |
+| =S=                          | speaker notes and presentation timer    |
+| =B= or =.=                   | blank the screen                        |
+| =D=                          | switch light / dark                     |
+| =?= or =H=                   | on-screen key list                      |
+| =Ctrl+P=                     | print — one page per slide              |
+
+Swipe left and right works on a tablet. The URL carries the position
+(=talk.html#/7=), so reloading resumes where you were and a link can point at
+one slide.
+
+** PDF handouts
+
+=Ctrl+P= in the browser, then "Save as PDF". Every slide becomes one landscape
+page with all fragments revealed. Headless, for a Makefile:
+
+#+BEGIN_SRC sh
+chromium --headless --print-to-pdf=talk.pdf --no-pdf-header-footer talk.html
+#+END_SRC
+
+* Colour scheme
+
+The palette is built for a lit meeting room rather than for a screenshot: a
+warm off-white ground, near-black text at high contrast, and a single accent
+colour carrying the slide rule, headings, list markers and section dividers.
+Body text is 26 px in a 1280 × 720 design space, so it stays legible from the
+back of a room.
+
+Everything is a CSS custom property. =#+ORG_PPT_ACCENT= restyles a deck to a
+company colour in one line, and the dark theme is a full second palette rather
+than an inversion. The audience never sees a theme switch unless you press =D=.
+
+* How it works
+
+=org-ppt= defines an Org export backend derived from =html=, so every
+construct Org can already export — tables, source blocks, footnotes, Babel
+results, LaTeX fragments — keeps working. The backend replaces five things:
+
+- =headline= decides whether a heading is a slide, a divider or in-slide text
+- =template= / =inner-template= build the scaled stage and inline the assets
+- =link= and =paragraph= rewrite local image URLs into base64 data URIs
+- =special-block= adds the presentation blocks
+- =item= adds the fragment class to stepped lists
+
+Slides live in a fixed 1280 × 720 (or 1024 × 768) stage that the runtime
+scales to the viewport. Layout is therefore identical on a laptop, a projector
+and a 4K TV — the same reason PowerPoint works in a fixed slide size.
+
+** Repository layout
+
+#+BEGIN_EXAMPLE
+org-ppt.el          the export backend
+assets/org-ppt.css  slide design, themes, print rules
+assets/org-ppt.js   navigation, overview, speaker notes, timer
+examples/demo.org   a deck exercising every feature
+test/               ERT suite
+#+END_EXAMPLE
+
+=assets/= is read at export time and inlined, so editing the CSS and
+re-exporting is the whole design loop. No build step.
+
+* Development
+
+#+BEGIN_SRC sh
+make            # byte-compile
+make test       # ERT suite
+make demo       # export examples/demo.org
+make verify     # export, then headless screenshots into build/
+make clean
+#+END_SRC
+
+* Licence
+
+GPL-3.0-or-later.

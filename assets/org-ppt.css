@@ -1,0 +1,658 @@
+/* org-ppt.css --- presentation stylesheet for org-ppt
+ *
+ * Design space is a fixed 1280x720 (or 1024x768) stage that JS scales to the
+ * viewport, so every slide lays out identically at any screen size.
+ * Colours live in custom properties; the exporter rewrites --accent when the
+ * document sets #+ORG_PPT_ACCENT.
+ */
+
+/* ------------------------------------------------------------------ tokens */
+
+:root {
+  --stage-w: 1280px;
+  --stage-h: 720px;
+
+  --bg:        #EFEDE9;
+  --surface:   #FFFFFF;
+  --ink:       #16212B;
+  --ink-soft:  #47586A;
+  --ink-faint: #8494A3;
+  --rule:      #D8D3CC;
+  --accent:    #0F6FC5;
+  --accent-2:  #B4460E;
+  --code-bg:   #F4F2EF;
+  --quote-bg:  #F4F2EF;
+  --shadow:    0 6px 28px rgba(20, 33, 46, .13), 0 1px 3px rgba(20, 33, 46, .08);
+  --sans: ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+          "Liberation Sans", Arial, sans-serif;
+  --mono: ui-monospace, "JetBrains Mono", "Fira Code", "DejaVu Sans Mono",
+          Consolas, monospace;
+}
+
+:root[data-theme="dark"] {
+  --bg:        #0D1319;
+  --surface:   #161F28;
+  --ink:       #E9EEF3;
+  --ink-soft:  #A8B7C4;
+  --ink-faint: #6C7C8B;
+  --rule:      #2A3743;
+  --accent:    #4FA6E8;
+  --accent-2:  #F0925A;
+  --code-bg:   #0A1016;
+  --quote-bg:  #1B242E;
+  --shadow:    0 6px 30px rgba(0, 0, 0, .55);
+}
+
+/* ------------------------------------------------------------------- shell */
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+body.opp-blackout .opp-viewport { visibility: hidden; }
+body.opp-blackout { background: #000; }
+
+.opp-viewport {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+/* The scaled stage. JS sets --scale on resize. */
+.opp-stage {
+  position: relative;
+  width: var(--stage-w);
+  height: var(--stage-h);
+  transform: scale(var(--scale, 1));
+  transform-origin: center center;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------------ slides */
+
+.opp-slide {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  padding: 64px 84px 76px;
+  box-sizing: border-box;
+  font-size: 26px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.opp-slide.is-current { display: flex; }
+
+/* Transitions ---------------------------------------------------------- */
+
+.opp-stage[data-transition="fade"]  .opp-slide.is-current { animation: opp-fade .28s ease both; }
+.opp-stage[data-transition="slide"] .opp-slide.is-current { animation: opp-slide-in .3s cubic-bezier(.22,.61,.36,1) both; }
+.opp-stage[data-transition="slide"] .opp-slide.is-current.is-backwards { animation-name: opp-slide-in-back; }
+.opp-stage[data-transition="none"]  .opp-slide.is-current { animation: none; }
+
+@keyframes opp-fade { from { opacity: 0 } to { opacity: 1 } }
+@keyframes opp-slide-in { from { opacity: 0; transform: translateX(44px) } to { opacity: 1; transform: none } }
+@keyframes opp-slide-in-back { from { opacity: 0; transform: translateX(-44px) } to { opacity: 1; transform: none } }
+
+@media (prefers-reduced-motion: reduce) {
+  .opp-slide.is-current { animation: none !important; }
+}
+
+/* Headings -------------------------------------------------------------- */
+
+.opp-slide > h2 {
+  margin: 0 0 26px;
+  padding: 0 0 16px;
+  font-size: 46px;
+  line-height: 1.15;
+  font-weight: 650;
+  letter-spacing: -.015em;
+  color: var(--ink);
+  border-bottom: 3px solid var(--accent);
+  flex: 0 0 auto;
+}
+
+.opp-slide h3 {
+  margin: 22px 0 10px;
+  font-size: 31px;
+  font-weight: 620;
+  letter-spacing: -.01em;
+  color: var(--accent);
+}
+
+.opp-slide h4 {
+  margin: 18px 0 8px;
+  font-size: 26px;
+  font-weight: 650;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+.opp-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Title slide ----------------------------------------------------------- */
+
+.opp-slide.opp-title {
+  justify-content: center;
+  padding: 64px 96px;
+  background:
+    radial-gradient(120% 90% at 8% 0%,
+      color-mix(in srgb, var(--accent) 13%, transparent) 0%, transparent 62%),
+    var(--surface);
+}
+
+.opp-title h1 {
+  margin: 0;
+  font-size: 70px;
+  line-height: 1.08;
+  font-weight: 700;
+  letter-spacing: -.028em;
+  max-width: 20ch;
+}
+
+.opp-title .opp-subtitle {
+  margin: 22px 0 0;
+  font-size: 30px;
+  font-weight: 400;
+  color: var(--ink-soft);
+  max-width: 34ch;
+}
+
+.opp-title .opp-rule {
+  width: 128px;
+  height: 6px;
+  margin: 38px 0 30px;
+  background: var(--accent);
+  border-radius: 3px;
+}
+
+.opp-title .opp-meta {
+  font-size: 23px;
+  color: var(--ink-soft);
+  line-height: 1.6;
+}
+.opp-title .opp-meta .opp-author { font-weight: 600; color: var(--ink); }
+
+/* Section divider ------------------------------------------------------- */
+
+.opp-slide.opp-section {
+  justify-content: center;
+  background: var(--accent);
+  color: #fff;
+  padding: 64px 96px;
+}
+.opp-slide.opp-section h2 {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font-size: 62px;
+  color: #fff;
+  letter-spacing: -.025em;
+}
+.opp-slide.opp-section .opp-kicker {
+  font-size: 21px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  opacity: .78;
+  margin: 0 0 18px;
+  font-weight: 600;
+}
+.opp-slide.opp-section .opp-body { flex: 0 0 auto; }
+.opp-slide.opp-section p { color: rgba(255,255,255,.9); font-size: 27px; }
+
+/* ---------------------------------------------------------------- content */
+
+.opp-slide p { margin: 0 0 .82em; }
+.opp-slide > .opp-body > *:last-child { margin-bottom: 0; }
+
+.opp-slide a { color: var(--accent); text-decoration-thickness: 2px; text-underline-offset: 3px; }
+.opp-slide strong { font-weight: 680; }
+.opp-slide em { font-style: italic; color: var(--ink-soft); }
+
+.opp-slide ul, .opp-slide ol { margin: 0 0 .82em; padding-left: 1.3em; }
+.opp-slide li { margin: 0 0 .46em; }
+.opp-slide li::marker { color: var(--accent); font-weight: 700; }
+.opp-slide ul ul, .opp-slide ol ol, .opp-slide ul ol, .opp-slide ol ul {
+  margin-top: .42em;
+  font-size: .92em;
+}
+
+/* Description lists (Org "- term :: definition") */
+.opp-slide dt { font-weight: 660; color: var(--accent); margin-top: .5em; }
+.opp-slide dd { margin: .12em 0 .5em 1.4em; }
+
+/* Code ------------------------------------------------------------------ */
+
+.opp-slide code, .opp-slide kbd, .opp-slide samp {
+  font-family: var(--mono);
+  /* Ligatures would render VHDL's "<=" as a single glyph, changing what the
+     audience reads. Source text is shown exactly as written. */
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "clig" 0, "calt" 0;
+  font-size: .87em;
+  background: var(--code-bg);
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  padding: .06em .34em;
+}
+
+.opp-slide pre {
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "clig" 0, "calt" 0;
+  margin: 0 0 .82em;
+  padding: 18px 22px;
+  background: var(--code-bg);
+  border: 1px solid var(--rule);
+  border-left: 5px solid var(--accent);
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-size: 20px;
+  line-height: 1.45;
+  overflow: auto;
+  max-height: 100%;
+  tab-size: 4;
+}
+.opp-slide pre code { background: none; border: 0; padding: 0; font-size: inherit; }
+.opp-slide .org-src-container { margin: 0 0 .82em; }
+
+/* Org's htmlize faces are emitted as inline styles in light mode; in dark
+   mode force a readable fallback so a light-themed export stays legible. */
+:root[data-theme="dark"] .opp-slide pre span { color: inherit !important; }
+
+/* Syntax highlighting.
+   Exports run htmlize in "css" mode, so the colours come from here rather
+   than from whatever Emacs theme happened to be loaded at export time. */
+
+.opp-slide pre .org-keyword,
+.opp-slide pre .org-rainbow-delimiters-depth-1 { color: var(--sx-keyword); font-weight: 600; }
+.opp-slide pre .org-string,
+.opp-slide pre .org-doc                        { color: var(--sx-string); }
+.opp-slide pre .org-comment,
+.opp-slide pre .org-comment-delimiter          { color: var(--sx-comment); font-style: italic; }
+.opp-slide pre .org-function-name              { color: var(--sx-func); font-weight: 600; }
+.opp-slide pre .org-variable-name              { color: var(--sx-var); }
+.opp-slide pre .org-type                       { color: var(--sx-type); }
+.opp-slide pre .org-constant,
+.opp-slide pre .org-builtin                    { color: var(--sx-const); }
+.opp-slide pre .org-preprocessor               { color: var(--sx-pre); }
+.opp-slide pre .org-warning,
+.opp-slide pre .org-negation-char              { color: var(--sx-warn); font-weight: 600; }
+
+:root {
+  --sx-keyword: #8250A8;
+  --sx-string:  #1F7A45;
+  --sx-comment: #7A8894;
+  --sx-func:    #0F6FC5;
+  --sx-var:     #B4460E;
+  --sx-type:    #0E7490;
+  --sx-const:   #A03030;
+  --sx-pre:     #6D6A00;
+  --sx-warn:    #C21C1C;
+}
+
+:root[data-theme="dark"] {
+  --sx-keyword: #C99BE8;
+  --sx-string:  #7FD79B;
+  --sx-comment: #6E7F8D;
+  --sx-func:    #6FB6F0;
+  --sx-var:     #F0A472;
+  --sx-type:    #58C2D4;
+  --sx-const:   #F08A8A;
+  --sx-pre:     #D4CE72;
+  --sx-warn:    #FF8A8A;
+}
+
+/* Quotes ---------------------------------------------------------------- */
+
+.opp-slide blockquote {
+  margin: 0 0 .82em;
+  padding: 18px 26px;
+  background: var(--quote-bg);
+  border-left: 5px solid var(--accent-2);
+  border-radius: 0 8px 8px 0;
+  font-size: 27px;
+  color: var(--ink-soft);
+}
+.opp-slide blockquote p:last-child { margin-bottom: 0; }
+
+/* Tables ---------------------------------------------------------------- */
+
+.opp-slide table {
+  border-collapse: collapse;
+  margin: 0 0 .82em;
+  font-size: 22px;
+  width: 100%;
+}
+.opp-slide th, .opp-slide td {
+  padding: 9px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--rule);
+}
+.opp-slide thead th {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--ink);
+  font-weight: 660;
+  border-bottom: 2px solid var(--accent);
+}
+.opp-slide tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--ink) 3.5%, transparent);
+}
+.opp-slide table caption { caption-side: bottom; font-size: 18px; color: var(--ink-faint); padding-top: 8px; }
+
+/* Figures --------------------------------------------------------------- */
+
+.opp-slide img, .opp-slide svg { max-width: 100%; height: auto; }
+.opp-slide figure {
+  margin: 0 0 .82em;
+  text-align: center;
+}
+.opp-slide figure img { border-radius: 8px; max-height: 460px; object-fit: contain; }
+.opp-slide figcaption, .opp-slide .figure-number {
+  font-size: 18px;
+  color: var(--ink-faint);
+  margin-top: 8px;
+  font-style: normal;
+}
+.opp-slide .figure-number { font-weight: 600; margin-right: .4em; }
+
+/* Cap image height on an ordinary slide: the frame is fixed, so an
+   oversized image would otherwise push the slide past its own bottom. */
+.opp-slide .opp-body img { max-height: 470px; }
+
+/* A :figure: slide gives one image the whole body, scaled up or down. */
+.opp-slide.opp-figure .opp-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.opp-slide.opp-figure .opp-body > p,
+.opp-slide.opp-figure .opp-body > figure {
+  margin: 0;
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+.opp-slide.opp-figure .opp-body img {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  object-fit: contain;
+  border-radius: 8px;
+}
+.opp-slide.opp-figure figcaption { flex: 0 0 auto; }
+
+/* Columns --------------------------------------------------------------- */
+
+.opp-columns {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 40px;
+  align-items: start;
+  margin: 0 0 .82em;
+}
+.opp-columns.opp-cols-center { align-items: center; }
+.opp-column > *:last-child { margin-bottom: 0; }
+
+/* Callout / note blocks -------------------------------------------------- */
+
+.opp-callout {
+  margin: 0 0 .82em;
+  padding: 16px 22px;
+  border-radius: 8px;
+  border-left: 5px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.opp-callout.opp-warning { border-left-color: var(--accent-2); background: color-mix(in srgb, var(--accent-2) 9%, transparent); }
+.opp-callout > *:last-child { margin-bottom: 0; }
+
+.opp-center { text-align: center; }
+.opp-big { font-size: 40px; line-height: 1.25; font-weight: 620; letter-spacing: -.015em; }
+
+/* Fragments ------------------------------------------------------------- */
+
+.fragment {
+  opacity: .16;
+  filter: blur(.35px);
+  transition: opacity .22s ease, filter .22s ease;
+}
+.fragment.is-visible { opacity: 1; filter: none; }
+body.opp-printing .fragment { opacity: 1; filter: none; }
+
+/* Speaker notes are never part of the slide itself. */
+.opp-notes { display: none; }
+
+/* ------------------------------------------------------------------ chrome */
+
+.opp-chrome {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 0 84px;
+  font-size: 16px;
+  color: var(--ink-faint);
+  pointer-events: none;
+}
+.opp-slide.opp-title .opp-chrome,
+.opp-slide.opp-section .opp-chrome { display: none; }
+
+.opp-footer { flex: 1 1 auto; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.opp-slideno { font-variant-numeric: tabular-nums; font-weight: 600; }
+.opp-logo { height: 26px; width: auto; opacity: .9; }
+
+.opp-progress {
+  position: absolute;
+  left: 0; bottom: 0;
+  height: 4px;
+  width: 0;
+  background: var(--accent);
+  transition: width .22s ease;
+  z-index: 5;
+}
+.opp-slide.opp-section .opp-progress { background: rgba(255,255,255,.6); }
+
+/* ---------------------------------------------------------------- overview */
+
+/* The overview is a generated layer of cloned slides, each scaled down inside
+   a fixed-aspect thumbnail. Cloning keeps the live deck's DOM untouched. */
+
+.opp-overview-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  display: none;
+  overflow: auto;
+  background: var(--bg);
+  padding: 30px;
+  box-sizing: border-box;
+}
+.opp-overview-layer.is-open { display: block; }
+
+.opp-ov-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 24px;
+}
+
+.opp-thumb {
+  position: relative;
+  aspect-ratio: var(--stage-ar, 16 / 9);
+  border: 3px solid var(--rule);
+  border-radius: 10px;
+  overflow: hidden;
+  cursor: pointer;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  transition: border-color .15s ease, transform .15s ease;
+}
+.opp-thumb:hover { transform: translateY(-2px); border-color: var(--ink-faint); }
+.opp-thumb.is-current { border-color: var(--accent); }
+
+.opp-thumb-inner {
+  position: absolute;
+  top: 0; left: 0;
+  width: var(--stage-w);
+  height: var(--stage-h);
+  transform-origin: top left;
+  pointer-events: none;
+}
+.opp-thumb-inner .opp-slide {
+  display: flex !important;
+  position: absolute;
+  inset: 0;
+  animation: none !important;
+}
+.opp-thumb-inner .fragment { opacity: 1; filter: none; }
+.opp-thumb-inner .opp-chrome, .opp-thumb-inner .opp-progress { display: none; }
+
+.opp-thumb-badge {
+  position: absolute;
+  right: 7px; bottom: 5px;
+  z-index: 2;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  border-radius: 5px;
+  padding: 1px 7px;
+}
+
+/* ------------------------------------------------------------------- help */
+
+.opp-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: none;
+  place-items: center;
+  background: rgba(9, 14, 19, .74);
+  backdrop-filter: blur(3px);
+}
+.opp-overlay.is-open { display: grid; }
+
+.opp-panel {
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: 14px;
+  padding: 32px 38px;
+  box-shadow: var(--shadow);
+  max-width: 640px;
+  font-size: 16px;
+  line-height: 1.6;
+}
+.opp-panel h2 { margin: 0 0 18px; font-size: 24px; }
+.opp-panel table { border-collapse: collapse; width: 100%; }
+.opp-panel td { padding: 5px 10px 5px 0; border: 0; vertical-align: top; }
+.opp-panel td:first-child { white-space: nowrap; width: 1%; }
+.opp-panel kbd {
+  font-family: var(--mono);
+  font-size: 13px;
+  background: var(--code-bg);
+  border: 1px solid var(--rule);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 2px 7px;
+}
+
+/* --------------------------------------------------------- speaker overlay */
+
+.opp-speaker {
+  position: fixed;
+  right: 16px; bottom: 16px;
+  z-index: 30;
+  width: 400px;
+  max-height: 62vh;
+  display: none;
+  flex-direction: column;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  font-size: 15px;
+  overflow: hidden;
+}
+.opp-speaker.is-open { display: flex; }
+.opp-speaker header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--rule);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  font-weight: 650;
+}
+.opp-timer { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 19px; }
+.opp-speaker .opp-sp-btn {
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  border: 1px solid var(--rule);
+  background: var(--surface);
+  color: var(--ink-soft);
+  border-radius: 6px;
+  padding: 2px 9px;
+}
+.opp-sp-body { padding: 12px 16px; overflow: auto; }
+.opp-sp-next { border-top: 1px solid var(--rule); padding: 10px 16px; color: var(--ink-faint); font-size: 14px; }
+.opp-sp-next b { color: var(--ink-soft); }
+.opp-sp-body :where(h1,h2,h3,h4) { font-size: 17px; margin: .6em 0 .3em; }
+.opp-sp-body p { margin: 0 0 .6em; }
+.opp-sp-body ul { padding-left: 1.2em; margin: 0 0 .6em; }
+.opp-sp-empty { color: var(--ink-faint); font-style: italic; }
+
+/* ------------------------------------------------------------------ print */
+
+/* Ctrl-P from the browser produces one landscape page per slide. */
+@page { size: 1280px 720px; margin: 0; }
+
+@media print {
+  html, body { overflow: visible; height: auto; background: #fff; }
+  .opp-viewport { position: static; display: block; }
+  .opp-stage {
+    width: 1280px;
+    height: auto;
+    transform: none;
+    box-shadow: none;
+    background: none;
+  }
+  .opp-slide {
+    display: flex !important;
+    position: relative;
+    inset: auto;
+    width: 1280px;
+    height: 720px;
+    page-break-after: always;
+    break-after: page;
+    animation: none !important;
+    box-shadow: none;
+    background: var(--surface);
+  }
+  .fragment { opacity: 1 !important; filter: none !important; }
+  .opp-overlay, .opp-speaker, .opp-progress { display: none !important; }
+}

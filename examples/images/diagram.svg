@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 200" width="520" height="200">
+  <rect x="8" y="60" width="140" height="80" rx="10" fill="#0F6FC5"/>
+  <text x="78" y="106" fill="#fff" font-family="sans-serif" font-size="18" text-anchor="middle">Org file</text>
+  <rect x="190" y="60" width="140" height="80" rx="10" fill="#47586A"/>
+  <text x="260" y="106" fill="#fff" font-family="sans-serif" font-size="18" text-anchor="middle">org-ppt</text>
+  <rect x="372" y="60" width="140" height="80" rx="10" fill="#B4460E"/>
+  <text x="442" y="106" fill="#fff" font-family="sans-serif" font-size="18" text-anchor="middle">one .html</text>
+  <path d="M152 100 h32 M334 100 h32" stroke="#47586A" stroke-width="3" marker-end="url(#a)"/>
+  <defs><marker id="a" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+    <path d="M0 0 L8 4 L0 8 z" fill="#47586A"/></marker></defs>
+</svg>
