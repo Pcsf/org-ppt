@@ -408,4 +408,25 @@ means the deck is clean rather than that the pattern stopped working."
     (should-not (string-match-p "<script[^>]*src=" html))
     (should-not (string-match-p "src=\"http" html))))
 
+(ert-deftest org-ppt-test-menu-actions-take-the-dispatcher-arity ()
+  "Every dispatcher entry accepts the four arguments Org funcalls it with.
+`org-export-dispatch\=' passes async, subtree, visible and body-only
+positionally, so a command declaring fewer raises
+`wrong-number-of-arguments\=' the moment it is picked from the menu."
+  (let ((entry (org-export-backend-menu (org-export-get-backend 'ppt))))
+    (dolist (action (mapcar (lambda (row) (nth 2 row)) (nth 2 entry)))
+      (let ((arity (func-arity action)))
+        (should (functionp action))
+        (should (or (eq (cdr arity) 'many) (>= (cdr arity) 4)))
+        (should (<= (car arity) 4))))))
+
+(ert-deftest org-ppt-test-file-url-escapes-whitespace ()
+  "A deck path with spaces becomes a URL a browser can open."
+  (should (equal (org-ppt--file-url "/tmp/space dir/my talk.html")
+                 "file:///tmp/space%20dir/my%20talk.html"))
+  (should (equal (org-ppt--file-url "/tmp/plain.html")
+                 "file:///tmp/plain.html"))
+  (should (equal (org-ppt--file-url "/tmp/a#b?c/deck.html")
+                 "file:///tmp/a%23b%3Fc/deck.html")))
+
 ;;; org-ppt-test.el ends here
