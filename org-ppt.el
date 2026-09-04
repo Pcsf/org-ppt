@@ -74,6 +74,7 @@
 (require 'subr-x)
 (require 'seq)
 (require 'json)
+(require 'url-util)
 
 (defgroup org-ppt nil
   "Export Org files to self-contained HTML slide decks."
@@ -938,14 +939,34 @@ EXT-PLIST are as in `org-export-to-file'."
       (org-export-to-file 'ppt file
         async subtreep visible-only body-only ext-plist))))
 
+(defun org-ppt--file-url (file)
+  "Return a file:// URL for FILE, percent-encoding every path segment.
+A raw path goes into the URL verbatim, so a deck living under a directory
+with a space in its name yields a URL no browser can open.  Each segment
+is hexified separately, which leaves the separators alone and still
+escapes spaces, number signs, question marks and non-ASCII names."
+  (concat "file://"
+          (mapconcat #'url-hexify-string
+                     (split-string (expand-file-name file) "/")
+                     "/")))
+
 ;;;###autoload
-(defun org-ppt-export-to-html-and-open (&optional async subtreep visible-only)
+(defun org-ppt-export-to-html-and-open
+    (&optional async subtreep visible-only body-only ext-plist)
   "Export the current buffer to a presentation and open it in a browser.
-ASYNC, SUBTREEP and VISIBLE-ONLY are as in `org-ppt-export-to-html'."
+ASYNC, SUBTREEP, VISIBLE-ONLY, BODY-ONLY and EXT-PLIST are as in
+`org-ppt-export-to-html'.
+
+The full five-argument signature is deliberate: `org-export-dispatch'
+funcalls a menu action with four arguments -- async, subtree, visible and
+body-only -- so a command that takes fewer fails with
+`wrong-number-of-arguments' the moment it is chosen from the dispatcher.
+Every argument is optional, so older three-argument callers still work."
   (interactive)
-  (let ((file (org-ppt-export-to-html async subtreep visible-only)))
+  (let ((file (org-ppt-export-to-html
+               async subtreep visible-only body-only ext-plist)))
     (when (stringp file)
-      (funcall org-ppt-browser-function (concat "file://" (expand-file-name file))))
+      (funcall org-ppt-browser-function (org-ppt--file-url file)))
     file))
 
 ;;;###autoload

@@ -19,7 +19,7 @@ The exporter itself needs nothing beyond Emacs and Org.
 | Dependency | Version | Required?         | Used for                                          |
 |------------+---------+-------------------+---------------------------------------------------|
 | GNU Emacs  | ≥ 27.1  | yes               | the package                                       |
-| Org mode   | ≥ 9.3   | yes               | =ox-html=, which this backend derives from        |
+| Org mode   | ≥ 9.3   | yes               | =ox-html=, which this backend derives from (tested on 9.8.7 and 9.8.10) |
 | =htmlize=  | ≥ 1.34  | no                | syntax colours in =#+BEGIN_SRC= blocks            |
 | LaTeX + =dvipng= | any | no             | math as images, instead of the bundled KaTeX      |
 | A browser  | any     | to present        | Chromium, Firefox and WebKit are all fine         |
