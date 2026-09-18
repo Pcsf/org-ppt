@@ -32,12 +32,20 @@ pdf: demo | $(BUILD)
 	  --virtual-time-budget=6000 "file://$(CURDIR)/$(DEMO_HTML)"
 	@echo "wrote $(DEMO_PDF)"
 
-# Renders a few slides headless, so a design change can be eyeballed
-# without opening a browser by hand.
+# Renders a few slides headless, so a design change can be eyeballed without
+# opening a browser by hand. The list covers one slide per feature: 1 title
+# background from a template, 9 code, 11 math, 12 headings inside columns,
+# 20 a slide autofit shrank, 21 one it left alone, 22 one sized by hand.
+#
+# --force-prefers-reduced-motion is load-bearing, not tidiness: without it the
+# capture races the 0.28s entrance fade and two runs of the same page differ
+# by more than a percent of their pixels for no reason in the code.
+VERIFY_SLIDES ?= 1 9 11 12 20 21 22
 verify: demo | $(BUILD)
-	@for n in 1 4 9 10 11 13; do \
+	@for n in $(VERIFY_SLIDES); do \
 	  $(CHROMIUM) --headless --disable-gpu --no-sandbox --hide-scrollbars \
-	    --window-size=1600,900 --virtual-time-budget=4000 \
+	    --window-size=1600,900 --force-prefers-reduced-motion \
+	    --virtual-time-budget=8000 \
 	    --screenshot=$(BUILD)/slide-$$n.png \
 	    "file://$(CURDIR)/$(DEMO_HTML)#/$$n" 2>/dev/null; \
 	done

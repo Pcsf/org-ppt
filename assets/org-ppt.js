@@ -57,6 +57,49 @@
     return $$(".fragment", slide);
   }
 
+  /* ---------------------------------------------------------------- autofit */
+
+  /* A slide is a fixed frame, so content that runs past it is simply clipped.
+     Autofit shrinks the type of those slides and only those slides, by setting
+     the --opp-fit multiplier every size on the slide is expressed against. */
+
+  var fitMin = parseFloat(stage.dataset.autofitMin) || 0.5;
+
+  function wantsFit(slide) {
+    var own = slide.dataset.autofit;
+    return (own === undefined ? stage.dataset.autofit : own) === "1";
+  }
+
+  function overflows(slide) {
+    var body = $(".opp-body", slide);
+    // A one-pixel tolerance: sub-pixel rounding otherwise reports a slide that
+    // fits exactly as overflowing, and shrinks it for nothing.
+    if (body && body.scrollHeight > body.clientHeight + 1) { return true; }
+    return slide.scrollHeight > slide.clientHeight + 1;
+  }
+
+  function fitSlide(slide) {
+    slide.style.removeProperty("--opp-fit");
+    if (!overflows(slide)) { return; }
+    // Fitting is monotonic in the multiplier, so bisection lands on the largest
+    // readable size in a fixed number of reflows rather than stepping down.
+    var lo = fitMin, hi = 1;
+    for (var i = 0; i < 9; i++) {
+      var mid = (lo + hi) / 2;
+      slide.style.setProperty("--opp-fit", String(mid));
+      if (overflows(slide)) { hi = mid; } else { lo = mid; }
+    }
+    slide.style.setProperty("--opp-fit", lo.toFixed(4));
+  }
+
+  function refit() {
+    var wanted = slides.filter(wantsFit);
+    if (!wanted.length) { return; }
+    stage.classList.add("is-measuring");
+    try { wanted.forEach(fitSlide); }
+    finally { stage.classList.remove("is-measuring"); }
+  }
+
   /* ----------------------------------------------------------------- layout */
 
   function rescale() {
@@ -438,13 +481,16 @@
   });
 
   rescale();
+  refit();
   if (!readHash()) { render(false); }
 
-  // Fonts and images settle after first paint; re-measure once they have.
-  window.addEventListener("load", rescale);
+  // Fonts and images settle after first paint; re-measure once they have,
+  // because a slide that fits in a fallback face may not fit in the real one.
+  window.addEventListener("load", function () { refit(); rescale(); });
 
   window.orgPpt = {
     goTo: goTo, next: next, prev: prev,
+    refit: refit,
     slideCount: slides.length,
     state: state
   };

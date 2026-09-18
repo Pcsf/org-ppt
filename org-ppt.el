@@ -49,13 +49,22 @@
 ;;   #+ORG_PPT_FOOTER:     text shown bottom-left on every content slide
 ;;   #+ORG_PPT_LOGO:       path to an image shown bottom-right
 ;;   #+ORG_PPT_SLIDE_LEVEL: 1
+;;   #+ORG_PPT_FONT_SCALE: 0.9 | 90% | 24px
+;;   #+ORG_PPT_AUTOFIT:    t | nil
+;;   #+ORG_PPT_TITLE_BG:   image, or template.pptx, or template.pptx::member
+;;   #+ORG_PPT_TITLE_BG_DIM: 0 .. 1
+;;   #+ORG_PPT_TITLE_BG_FIT: cover | contain
+;;   #+ORG_PPT_PRINT_NOTES: t | nil
+;;   #+ORG_PPT_PRINT_NOTES_HEIGHT: 290
 ;;
 ;; Per-headline control, via tags and properties:
 ;;
 ;;   :section:   render this slide as a full-bleed divider
 ;;   :figure:    center one large figure and let it fill the frame
 ;;   :notes:     the subtree is speaker notes, never shown to the audience
+;;   :fit: / :nofit:   turn autofit on or off for this slide alone
 ;;   :PPT_CLASS: extra CSS classes on the slide
+;;   :PPT_FONT_SCALE: type size for this slide alone
 ;;
 ;; Block-level helpers:
 ;;
@@ -125,6 +134,70 @@ Used for slide rules, headings, list markers and section dividers."
 (defcustom org-ppt-title-slide t
   "Whether to generate an opening title slide from #+TITLE and friends."
   :type 'boolean
+  :group 'org-ppt)
+
+(defcustom org-ppt-font-scale nil
+  "Type size for the whole deck, or nil for the built-in 26 px.
+A bare number is a multiplier of the built-in size, \"90%\" says the same
+thing, and an explicit length such as \"24px\" sets the base outright.
+Every size on a slide is expressed against that base, so one value moves
+headings, body text, code and tables together."
+  :type '(choice (const :tag "Built-in" nil) string number)
+  :group 'org-ppt)
+
+(defcustom org-ppt-autofit nil
+  "Whether a slide whose content overflows the frame is shrunk to fit.
+The runtime measures each slide once the fonts and images have settled and
+scales only the slides that overflow, leaving the rest at the deck size.
+Individual slides opt in or out with the `:fit:' and `:nofit:' tags."
+  :type 'boolean
+  :group 'org-ppt)
+
+(defcustom org-ppt-autofit-minimum 0.5
+  "Smallest fraction of the deck type size autofit will shrink a slide to.
+A slide that still overflows at this size is left overflowing rather than
+shrunk to something nobody at the back of the room can read."
+  :type 'number
+  :group 'org-ppt)
+
+(defcustom org-ppt-title-bg nil
+  "Background image for the title slide, or nil.
+Either an image file, or a PowerPoint template whose title background is
+extracted: \"brand.potx\" picks the background automatically, and
+\"brand.potx::ppt/media/image2.png\" names the member outright.
+`org-ppt-list-pptx-images' lists what a template holds."
+  :type '(choice (const :tag "None" nil) string)
+  :group 'org-ppt)
+
+(defcustom org-ppt-title-bg-dim 0
+  "How strongly the title background is washed out, from 0 to 1.
+The wash is the slide's own surface colour, so the title text keeps the
+contrast the theme designed for it.  Photographs usually need 0.3 or more."
+  :type 'number
+  :group 'org-ppt)
+
+(defcustom org-ppt-title-bg-fit "cover"
+  "How the title background fills the slide: \"cover\" or \"contain\"."
+  :type '(choice (const "cover") (const "contain"))
+  :group 'org-ppt)
+
+(defcustom org-ppt-print-notes nil
+  "Whether printing puts each slide's speaker notes below that slide.
+The page grows by `org-ppt-print-notes-height' to hold the band, so the
+handout is still one slide per page.  The screen deck is unaffected."
+  :type 'boolean
+  :group 'org-ppt)
+
+(defcustom org-ppt-print-notes-height 290
+  "Height in pixels of the printed speaker-notes band under each slide.
+Notes longer than the band are clipped, so raise this for a talk with
+long notes rather than letting them run off the page."
+  :type 'integer
+  :group 'org-ppt)
+
+(defcustom org-ppt-unzip-program "unzip"
+  "Program used to read a PowerPoint template, which is a zip archive."
+  :type 'string
   :group 'org-ppt)
 
 (defcustom org-ppt-toc-title "Agenda"
@@ -497,7 +570,191 @@ was left in pass-through mode by `#+OPTIONS: tex:'."
                m)))))
      html t t)))
 
+;;;; PowerPoint templates
+
+;; A .pptx or .potx is a zip.  The background picture of the title slide is an
+;; ordinary member under ppt/media, reached through the relationship files of
+;; the first slide, then its layout, then the master -- a template holds no
+;; slides at all, which is why the chain has to be walked rather than assumed.
+
+(defconst org-ppt--pptx-extensions '("pptx" "potx" "ppsx" "pptm" "potm")
+  "File extensions read as PowerPoint packages.")
+
+(defun org-ppt--pptx-p (path)
+  "Return non-nil when PATH names a PowerPoint package."
+  (member (downcase (or (file-name-extension path) ""))
+          org-ppt--pptx-extensions))
+
+(defun org-ppt--unzip (archive member &optional binary)
+  "Return MEMBER of ARCHIVE as a string, or nil when it cannot be read.
+With BINARY, the result is unibyte, which is what base64 encoding needs."
+  (with-temp-buffer
+    (when binary (set-buffer-multibyte nil))
+    (let* ((coding-system-for-read (if binary 'binary 'utf-8))
+           ;; execFile semantics: the archive and member names are data, never
+           ;; shell words, so a template path with a space or a quote in it is
+           ;; harmless.
+           (status (ignore-errors
+                     (call-process org-ppt-unzip-program nil t nil
+                                   "-p" archive member))))
+      (when (and (eq status 0) (> (buffer-size) 0))
+        (buffer-string)))))
+
+(defun org-ppt--pptx-members (archive)
+  "Return (NAME . SIZE) for every member of ARCHIVE, or nil on failure."
+  (with-temp-buffer
+    (let ((status (ignore-errors
+                    (call-process org-ppt-unzip-program nil t nil
+                                  "-l" archive))))
+      (when (eq status 0)
+        (goto-char (point-min))
+        (let ((found nil))
+          (while (re-search-forward
+                  "^ *\\([0-9]+\\) +[0-9-]+ +[0-9:]+ +\\(.+\\)$" nil t)
+            (push (cons (match-string 2) (string-to-number (match-string 1)))
+                  found))
+          (nreverse found))))))
+
+(defun org-ppt--pptx-rel-targets (archive part)
+  "Return the image targets PART relates to, plus the parts it inherits from.
+PART is a member path like \"ppt/slides/slide1.xml\".  Returns a cons of
+the image member paths and the layout or master member paths, both already
+resolved against PART's own directory."
+  (let* ((dir (file-name-directory part))
+         (rels (concat dir "_rels/" (file-name-nondirectory part) ".rels"))
+         (xml (org-ppt--unzip archive rels))
+         (images nil) (parents nil))
+    (when xml
+      (dolist (entry (org-ppt--matches "<Relationship\\b[^>]*>" xml))
+        (let ((type (and (string-match "Type=\"\\([^\"]+\\)\"" entry)
+                         (match-string 1 entry)))
+              (target (and (string-match "Target=\"\\([^\"]+\\)\"" entry)
+                           (match-string 1 entry))))
+          (when (and type target (not (string-match-p "\\`https?:" target)))
+            (let ((path (org-ppt--pptx-resolve dir target)))
+              (cond
+               ((string-suffix-p "/image" type) (push path images))
+               ((or (string-suffix-p "/slideLayout" type)
+                    (string-suffix-p "/slideMaster" type))
+                (push path parents))))))))
+    (cons (nreverse images) (nreverse parents))))
+
+(defun org-ppt--pptx-resolve (dir target)
+  "Resolve a relationship TARGET against the package directory DIR."
+  (let ((path (concat dir target)))
+    ;; Package paths are always forward-slashed and relative to the zip root,
+    ;; so "../media/x.png" is collapsed here rather than by the filesystem.
+    (while (string-match "\\(?:[^/]+\\)/\\.\\./" path)
+      (setq path (replace-match "" t t path)))
+    (replace-regexp-in-string "\\`/+" "" path)))
+
+(defun org-ppt--pptx-background-member (archive)
+  "Return the member of ARCHIVE that is most likely the title background.
+The first slide is preferred, then its layout, then the master, because a
+picture placed on the slide itself overrides one inherited from either.  A
+template carries no slides, so the walk starts at the title layout instead.
+Within one level the largest picture wins: a background covers the frame
+and a logo does not."
+  (let ((sizes (org-ppt--pptx-members archive))
+        (seen nil)
+        (queue (list "ppt/slides/slide1.xml"
+                     "ppt/slideLayouts/slideLayout1.xml"
+                     "ppt/slideMasters/slideMaster1.xml"))
+        (found nil))
+    (while (and queue (not found))
+      (let ((part (pop queue)))
+        (unless (member part seen)
+          (push part seen)
+          (let* ((rel (org-ppt--pptx-rel-targets archive part))
+                 (images (seq-filter (lambda (m) (org-ppt--mime-type m))
+                                     (car rel))))
+            (setq queue (append queue (cdr rel)))
+            (when images
+              (setq found
+                    (car (sort images
+                               (lambda (a b)
+                                 (> (or (cdr (assoc a sizes)) 0)
+                                    (or (cdr (assoc b sizes)) 0)))))))))))
+    found))
+
+(defun org-ppt--pptx-image-uri (archive member)
+  "Return MEMBER of the PowerPoint package ARCHIVE as a data URI.
+With MEMBER nil the title background is located by walking the package."
+  (unless (executable-find org-ppt-unzip-program)
+    (error "org-ppt: reading %s needs `%s', which is not installed"
+           (file-name-nondirectory archive) org-ppt-unzip-program))
+  (let ((name (or member (org-ppt--pptx-background-member archive))))
+    (cond
+     ((null name)
+      (message "org-ppt: found no background picture in %s; \
+`org-ppt-list-pptx-images' shows what it holds"
+               (file-name-nondirectory archive))
+      nil)
+     ((null (org-ppt--mime-type name))
+      (message "org-ppt: %s is not an image org-ppt can embed" name)
+      nil)
+     (t
+      (let ((bytes (org-ppt--unzip archive name t)))
+        (if (not bytes)
+            (progn (message "org-ppt: %s holds no member %s"
+                            (file-name-nondirectory archive) name)
+                   nil)
+          (concat "data:" (org-ppt--mime-type name) ";base64,"
+                  (base64-encode-string bytes t))))))))
+
+;;;###autoload
+(defun org-ppt-list-pptx-images (template)
+  "List the pictures inside the PowerPoint TEMPLATE, largest first.
+Each line is a member path that can be used verbatim after `::' in
+`#+ORG_PPT_TITLE_BG:'."
+  (interactive "fPowerPoint template: ")
+  (let* ((members (or (org-ppt--pptx-members (expand-file-name template))
+                      (user-error "org-ppt: cannot read %s with `%s'"
+                                  template org-ppt-unzip-program)))
+         (images (sort (seq-filter (lambda (m) (org-ppt--mime-type (car m)))
+                                   members)
+                       (lambda (a b) (> (cdr a) (cdr b))))))
+    (with-current-buffer (get-buffer-create "*org-ppt template*")
+      (erase-buffer)
+      (insert (format "%s\n\n" (expand-file-name template)))
+      (if (not images)
+          (insert "No embedded pictures.\n")
+        (dolist (image images)
+          (insert (format "%8.1f KB  %s\n" (/ (cdr image) 1024.0) (car image)))))
+      (goto-char (point-min))
+      (display-buffer (current-buffer)))))
+
 ;;;; Small helpers
+
+(defun org-ppt--truthy (value)
+  "Return non-nil unless VALUE is one of Org's ways of writing no.
+Keyword values arrive as strings, so `nil' has to be recognised as text."
+  (cond ((null value) nil)
+        ((stringp value)
+         (not (member (downcase (string-trim value))
+                      '("" "nil" "no" "off" "false" "0"))))
+        (t t)))
+
+(defun org-ppt--font-scale-declaration (value)
+  "Return the CSS custom property that VALUE asks for, or nil.
+A length sets the base size; anything else scales the built-in one."
+  (let ((value (if (numberp value) (number-to-string value)
+                 (string-trim (or value "")))))
+    (cond
+     ((string-empty-p value) nil)
+     ((string-match-p "\\`[0-9.]+ *\\(px\\|pt\\|em\\|rem\\|vh\\|vw\\)\\'" value)
+      (format "--opp-base:%s" (replace-regexp-in-string " " "" value)))
+     ((string-match "\\`\\([0-9.]+\\) *%\\'" value)
+      (format "--opp-scale:%s" (/ (string-to-number (match-string 1 value)) 100.0)))
+     ((string-match-p "\\`[0-9.]+\\'" value)
+      (format "--opp-scale:%s" value))
+     (t (message "org-ppt: cannot read font scale %S; using the deck size" value)
+        nil))))
+
+(defun org-ppt--style-attribute (declarations)
+  "Return a style attribute built from DECLARATIONS, or the empty string."
+  (let ((live (delq nil declarations)))
+    (if live (format " style=\"%s\"" (string-join live ";")) "")))
 
 (defun org-ppt--parent (element)
   "Return the parent of ELEMENT, across Org versions."
@@ -549,12 +806,13 @@ Returns a cons of the cleaned body and the concatenated notes."
   "Return CONTENTS unchanged; slides supply their own containers."
   (or contents ""))
 
-(defun org-ppt--slide (title body notes classes data-title)
-  "Assemble one slide from TITLE, BODY, NOTES, CLASSES and DATA-TITLE."
+(defun org-ppt--slide (title body notes classes data-title &optional attrs)
+  "Assemble one slide from TITLE, BODY, NOTES, CLASSES and DATA-TITLE.
+ATTRS is extra markup for the opening tag, already escaped."
   (concat
-   (format "<section class=\"opp-slide%s\" data-title=\"%s\">\n"
+   (format "<section class=\"opp-slide%s\" data-title=\"%s\"%s>\n"
            (if (string-empty-p classes) "" (concat " " classes))
-           (or data-title ""))
+           (or data-title "") (or attrs ""))
    (when (and title (not (string-empty-p title)))
      (format "<h2>%s</h2>\n" title))
    (format "<div class=\"opp-body\">\n%s</div>\n" (or body ""))
@@ -562,17 +820,34 @@ Returns a cons of the cleaned body and the concatenated notes."
      (format "<aside class=\"opp-notes\">%s</aside>\n" notes))
    "</section>\n"))
 
-(defun org-ppt--divider (title body classes data-title)
-  "Assemble a full-bleed section divider from TITLE, BODY and CLASSES."
+(defun org-ppt--divider (title body classes data-title &optional attrs)
+  "Assemble a full-bleed section divider from TITLE, BODY and CLASSES.
+ATTRS is extra markup for the opening tag, already escaped."
   (concat
-   (format "<section class=\"opp-slide opp-section%s\" data-title=\"%s\">\n"
+   (format "<section class=\"opp-slide opp-section%s\" data-title=\"%s\"%s>\n"
            (if (string-empty-p classes) "" (concat " " classes))
-           (or data-title ""))
+           (or data-title "") (or attrs ""))
    (format "<h2>%s</h2>\n" title)
    (if (string-empty-p (string-trim (or body "")))
        ""
      (format "<div class=\"opp-body\">\n%s</div>\n" body))
    "</section>\n"))
+
+(defun org-ppt--headline-attributes (headline tags)
+  "Return the extra opening-tag markup HEADLINE asks for.
+Covers the per-slide type size and the per-slide autofit override, both of
+which are read by the stylesheet and the runtime rather than baked in here."
+  (concat
+   (cond ((member "fit" tags) " data-autofit=\"1\"")
+         ((member "nofit" tags) " data-autofit=\"0\"")
+         ((org-element-property :PPT_AUTOFIT headline)
+          (format " data-autofit=\"%s\""
+                  (if (org-ppt--truthy (org-element-property :PPT_AUTOFIT headline))
+                      "1" "0")))
+         (t ""))
+   (org-ppt--style-attribute
+    (list (org-ppt--font-scale-declaration
+           (org-element-property :PPT_FONT_SCALE headline))))))
 
 (defun org-ppt-headline (headline contents info)
   "Transcode HEADLINE into a slide, a divider, or an in-slide heading."
@@ -583,6 +858,7 @@ Returns a cons of the cleaned body and the concatenated notes."
            (title (org-export-data (org-element-property :title headline) info))
            (data-title (org-ppt--strip-tags title))
            (extra (or (org-element-property :PPT_CLASS headline) ""))
+           (attrs (org-ppt--headline-attributes headline tags))
            (contents (or contents "")))
       (cond
        ;; A subtree tagged :notes: never reaches the audience.
@@ -594,7 +870,7 @@ Returns a cons of the cleaned body and the concatenated notes."
         (let* ((split (org-ppt--split-off-slides contents))
                (intro (car split))
                (children (cdr split)))
-          (concat (org-ppt--divider title intro extra data-title) children)))
+          (concat (org-ppt--divider title intro extra data-title attrs) children)))
 
        ;; At the slide level: a slide.
        ((= level slide-level)
@@ -604,7 +880,7 @@ Returns a cons of the cleaned body and the concatenated notes."
                                          (when (member "figure" tags) "opp-figure")
                                          (when (member "center" tags) "opp-center")))
                          " ")))
-          (org-ppt--slide title (car split) (cdr split) classes data-title)))
+          (org-ppt--slide title (car split) (cdr split) classes data-title attrs)))
 
        ;; Below the slide level: an ordinary heading inside the slide.
        (t
@@ -667,6 +943,76 @@ INFO is the export communication channel; `#+OPTIONS: tex:nil' still wins."
         (replace-match "\\1<li class=\"fragment\"\\2" t nil html))
        (t html)))))
 
+;;;; Headings inside a columns block
+
+;; Org resolves outline structure before block structure, so a headline inside
+;; #+BEGIN_COLUMNS ends the section, the block never closes, and both the block
+;; lines and the layout are lost.  That is not something a transcoder can
+;; repair: by the time the tree exists the columns are already gone.  So the
+;; headline is turned into an ordinary block before the parse, on the copy of
+;; the buffer Org exports from -- the source file is never touched.
+
+(defconst org-ppt--verbatim-block-re
+  "\\`[ \t]*#\\+BEGIN_\\(SRC\\|EXAMPLE\\|EXPORT\\)\\b"
+  "Blocks whose contents are literal text and must never be rewritten.")
+
+(defun org-ppt--column-heading-replacement (stars title)
+  "Return the block that stands in for a headline of STARS depth titled TITLE."
+  (format "#+BEGIN_PPTHEADING %d\n%s\n#+END_PPTHEADING" (length stars) title))
+
+(defun org-ppt--rewrite-column-headings (&optional _backend)
+  "Turn headlines inside a columns block into in-column headings.
+Runs on the buffer copy Org parses, before it is parsed.  Only the inside
+of a balanced #+BEGIN_COLUMNS region is touched, and literal blocks inside
+one are left exactly as written."
+  (save-excursion
+    (goto-char (point-min))
+    (let ((case-fold-search t)
+          (verbatim nil)
+          (columns nil))
+      (while (not (eobp))
+        (let ((line (buffer-substring-no-properties
+                     (line-beginning-position) (line-end-position))))
+          (cond
+           (verbatim
+            (when (string-match-p (format "\\`[ \t]*#\\+END_%s\\b" verbatim) line)
+              (setq verbatim nil)))
+           ((string-match org-ppt--verbatim-block-re line)
+            (setq verbatim (upcase (match-string 1 line))))
+           ((string-match-p "\\`[ \t]*#\\+BEGIN_COLUMNS\\b" line)
+            ;; An unclosed block would swallow the rest of the document, so the
+            ;; region is only entered once its end is known to exist.
+            (setq columns
+                  (save-excursion
+                    (re-search-forward "^[ \t]*#\\+END_COLUMNS\\b" nil t)))
+            (unless columns
+              (message "org-ppt: #+BEGIN_COLUMNS at line %d is never closed"
+                       (line-number-at-pos))))
+           ((string-match-p "\\`[ \t]*#\\+END_COLUMNS\\b" line)
+            (setq columns nil))
+           ((and columns
+                 (string-match
+                  "\\`\\(\\*+\\)[ \t]+\\(.*?\\)\\(?:[ \t]+\\(?::[[:alnum:]_@#%:]+:\\)\\)?[ \t]*\\'"
+                  line))
+            (let ((replacement (org-ppt--column-heading-replacement
+                                (match-string 1 line) (match-string 2 line))))
+              (delete-region (line-beginning-position) (line-end-position))
+              (insert replacement)))))
+        (forward-line 1)))))
+
+(defun org-ppt-ppt-heading (block contents info)
+  "Transcode the stand-in BLOCK for a headline inside a columns block.
+The depth carried as the block parameter picks the same heading level the
+headline would have produced outside the block."
+  (let* ((depth (string-to-number
+                 (or (org-element-property :parameters block) "0")))
+         (tag (if (<= depth (1+ (org-ppt--slide-level info))) "h3" "h4"))
+         ;; The title is one paragraph; the wrapper would put a block element
+         ;; inside a heading.
+         (text (string-trim
+                (replace-regexp-in-string "</?p>" "" (or contents "")))))
+    (format "<%s>%s</%s>\n" tag text tag)))
+
 (defconst org-ppt--special-blocks
   '(("notes"    . "<aside class=\"opp-notes\">%s</aside>")
     ("columns"  . "<div class=\"opp-columns\">%s</div>")
@@ -683,11 +1029,49 @@ INFO is the export communication channel; `#+OPTIONS: tex:nil' still wins."
   "Transcode a presentation-specific BLOCK, else defer to ox-html."
   (let* ((type (downcase (or (org-element-property :type block) "")))
          (shape (cdr (assoc type org-ppt--special-blocks))))
-    (if shape
-        (format shape (or contents ""))
-      (org-html-special-block block contents info))))
+    (cond
+     ((equal type "pptheading") (org-ppt-ppt-heading block contents info))
+     (shape (format shape (or contents "")))
+     (t (org-html-special-block block contents info)))))
 
 ;;;; Generated slides
+
+(defun org-ppt--title-background-uri (spec info)
+  "Return the title background SPEC as a data URI, or nil.
+SPEC is an image path, a PowerPoint package, or a package and a member
+separated by `::'."
+  (when (and spec (not (string-empty-p (string-trim spec))))
+    (let* ((spec (string-trim spec))
+           (member (and (string-match "\\`\\(.*?\\)::\\(.+\\)\\'" spec)
+                        (match-string 2 spec)))
+           (path (if member (match-string 1 spec) spec))
+           (full (org-ppt--resolve-path path info)))
+      (cond
+       ((not (file-readable-p full))
+        (message "org-ppt: title background %s is not readable" path)
+        nil)
+       ((org-ppt--pptx-p full) (org-ppt--pptx-image-uri full member))
+       (t (or (org-ppt--data-uri path info)
+              (progn (message "org-ppt: cannot embed title background %s" path)
+                     nil)))))))
+
+(defun org-ppt--title-background-attributes (info)
+  "Return the class and style a title background asks for, per INFO.
+Returns a cons of the extra class names and the opening-tag markup."
+  (let ((uri (org-ppt--title-background-uri (plist-get info :ppt-title-bg) info)))
+    (if (not uri)
+        (cons "" "")
+      (let ((dim (let ((raw (plist-get info :ppt-title-bg-dim)))
+                   (max 0 (min 1 (if (numberp raw)
+                                     raw
+                                   (string-to-number (or raw "0")))))))
+            (fit (if (equal (plist-get info :ppt-title-bg-fit) "contain")
+                     "contain" "cover")))
+        (cons " opp-has-bg"
+              (org-ppt--style-attribute
+               (list (format "--opp-title-bg:url(%s)" uri)
+                     (format "--opp-title-dim:%s" dim)
+                     (format "--opp-title-fit:%s" fit))))))))
 
 (defun org-ppt--title-slide (info)
   "Build the opening slide from the document metadata in INFO."
@@ -710,16 +1094,17 @@ INFO is the export communication channel; `#+OPTIONS: tex:nil' still wins."
                                 date)))
                   "<br>")))
       (unless (string-empty-p (string-trim (or title "")))
+        (pcase-let ((`(,bg-class . ,bg-style) (org-ppt--title-background-attributes info)))
         (concat
-         (format "<section class=\"opp-slide opp-title\" data-title=\"%s\">\n"
-                 (org-ppt--strip-tags title))
+         (format "<section class=\"opp-slide opp-title%s\" data-title=\"%s\"%s>\n"
+                 bg-class (org-ppt--strip-tags title) bg-style)
          (format "<h1>%s</h1>\n" title)
          (unless (string-empty-p (or subtitle ""))
            (format "<p class=\"opp-subtitle\">%s</p>\n" subtitle))
          "<div class=\"opp-rule\"></div>\n"
          (unless (string-empty-p meta)
            (format "<div class=\"opp-meta\">%s</div>\n" meta))
-         "</section>\n")))))
+         "</section>\n"))))))
 
 (defun org-ppt--outline-slide (info)
   "Build an agenda slide listing the top-level sections described by INFO."
@@ -752,9 +1137,12 @@ INFO is the export communication channel; `#+OPTIONS: tex:nil' still wins."
   (pcase-let ((`(,w ,h ,ar) (org-ppt--stage-geometry info)))
     (concat
      "<div class=\"opp-viewport\">\n"
-     (format (concat "<div class=\"opp-stage\" data-transition=\"%s\" "
-                     "style=\"--stage-w:%dpx;--stage-h:%dpx;--stage-ar:%s\">\n")
-             (or (plist-get info :ppt-transition) "fade") w h ar)
+     (format (concat "<div class=\"opp-stage\" data-transition=\"%s\""
+                     " data-autofit=\"%s\" data-autofit-min=\"%s\""
+                     " style=\"--stage-w:%dpx;--stage-h:%dpx;--stage-ar:%s\">\n")
+             (or (plist-get info :ppt-transition) "fade")
+             (if (org-ppt--truthy (plist-get info :ppt-autofit)) "1" "0")
+             org-ppt-autofit-minimum w h ar)
      (or (org-ppt--title-slide info) "")
      (or (org-ppt--outline-slide info) "")
      contents
@@ -781,6 +1169,29 @@ INFO is the export communication channel; `#+OPTIONS: tex:nil' still wins."
                 accent)
       "")))
 
+(defun org-ppt--font-style (info)
+  "Return a <style> block setting the deck-wide type size, per INFO."
+  (let ((declaration (org-ppt--font-scale-declaration
+                      (plist-get info :ppt-font-scale))))
+    (if declaration (format "<style>:root{%s}</style>\n" declaration) "")))
+
+(defun org-ppt--page-style (info)
+  "Return the @page rule the printed handout needs, per INFO.
+The page is as wide as the stage and as tall, plus the speaker-notes band
+when the deck prints its notes.  It has to be emitted here rather than
+written into the stylesheet because @page cannot read a custom property."
+  (pcase-let ((`(,w ,h ,_ar) (org-ppt--stage-geometry info)))
+    (let ((band (if (org-ppt--truthy (plist-get info :ppt-print-notes))
+                    (max 0 (let ((raw (plist-get info :ppt-print-notes-height)))
+                             (if (numberp raw) raw
+                               (string-to-number (or raw "0")))))
+                  0)))
+      (format "<style>@page{size:%dpx %dpx;margin:0}%s</style>\n"
+              w (+ h band)
+              (if (> band 0)
+                  (format ":root{--opp-notes-band:%dpx}" band)
+                "")))))
+
 (defun org-ppt-template (contents info)
   "Return the complete, self-contained HTML document around CONTENTS."
   (let* ((rendered (and org-ppt--math-queue (org-ppt--render-math-queue)))
@@ -800,7 +1211,9 @@ INFO is the export communication channel; `#+OPTIONS: tex:nil' still wins."
          (author (org-export-data (plist-get info :author) info)))
     (concat
      "<!DOCTYPE html>\n"
-     (format "<html lang=\"%s\" data-theme=\"%s\">\n" lang theme)
+     (format "<html lang=\"%s\" data-theme=\"%s\"%s>\n" lang theme
+             (if (org-ppt--truthy (plist-get info :ppt-print-notes))
+                 " data-print-notes=\"1\"" ""))
      "<head>\n"
      "<meta charset=\"utf-8\">\n"
      "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
@@ -818,6 +1231,8 @@ INFO is the export communication channel; `#+OPTIONS: tex:nil' still wins."
          (concat "<style>\n" (org-ppt--katex-css families) "\n</style>\n")
        "")
      (org-ppt--accent-style info)
+     (org-ppt--font-style info)
+     (org-ppt--page-style info)
      "</head>\n<body>\n"
      contents
      (org-ppt--chrome-template info)
@@ -841,6 +1256,14 @@ INFO is the export communication channel; `#+OPTIONS: tex:nil' still wins."
     (:ppt-footer "ORG_PPT_FOOTER" nil org-ppt-footer t)
     (:ppt-logo "ORG_PPT_LOGO" nil org-ppt-logo t)
     (:ppt-slide-level "ORG_PPT_SLIDE_LEVEL" nil org-ppt-slide-level t)
+    (:ppt-font-scale "ORG_PPT_FONT_SCALE" nil org-ppt-font-scale t)
+    (:ppt-autofit "ORG_PPT_AUTOFIT" nil org-ppt-autofit t)
+    (:ppt-title-bg "ORG_PPT_TITLE_BG" nil org-ppt-title-bg t)
+    (:ppt-title-bg-dim "ORG_PPT_TITLE_BG_DIM" nil org-ppt-title-bg-dim t)
+    (:ppt-title-bg-fit "ORG_PPT_TITLE_BG_FIT" nil org-ppt-title-bg-fit t)
+    (:ppt-print-notes "ORG_PPT_PRINT_NOTES" nil org-ppt-print-notes t)
+    (:ppt-print-notes-height "ORG_PPT_PRINT_NOTES_HEIGHT" nil
+                             org-ppt-print-notes-height t)
     (:ppt-embed-images nil "ppt-embed" org-ppt-embed-images)
     (:ppt-title-slide nil "ppt-title" org-ppt-title-slide)
     (:ppt-fragment-lists nil "ppt-frag" org-ppt-fragment-lists)
@@ -889,10 +1312,26 @@ list Org declares is probed, and the one that is absent is named."
 rendering math with the bundled KaTeX instead" mode missing)
           'katex)))))
 
+(defconst org-ppt--before-parsing-variable
+  (if (boundp 'org-export-before-parsing-functions)
+      'org-export-before-parsing-functions
+    'org-export-before-parsing-hook)
+  "The variable Org reads for functions to run before it parses the buffer.
+Org 9.6 renamed it and left the old name as an obsolete alias, so binding
+the wrong one on an older Org would make the columns rewrite silently do
+nothing rather than fail loudly.")
+
 (defmacro org-ppt--with-export-settings (&rest body)
   "Run BODY with the HTML settings a self-contained deck requires."
   (declare (indent 0) (debug t))
-  `(let* ((org-html-htmlize-output-type 'css)
+  ;; Headlines inside a columns block are rewritten on the buffer copy Org
+  ;; parses.  The hook is bound for this export only, so an HTML or LaTeX
+  ;; export of the same file is untouched.
+  `(cl-progv (list org-ppt--before-parsing-variable)
+       (list (cons #'org-ppt--rewrite-column-headings
+                   (and (boundp org-ppt--before-parsing-variable)
+                        (symbol-value org-ppt--before-parsing-variable))))
+     (let* ((org-html-htmlize-output-type 'css)
           (org-html-head-include-default-style nil)
           (org-html-head-include-scripts nil)
           (org-html-validation-link nil)
@@ -913,7 +1352,7 @@ rendering math with the bundled KaTeX instead" mode missing)
           (org-ppt-with-latex (if (eq org-ppt--math-mode 'katex)
                                   'mathjax
                                 org-ppt--math-mode)))
-     ,@body))
+       ,@body)))
 
 ;;;###autoload
 (defun org-ppt-export-as-html

@@ -22,6 +22,7 @@ The exporter itself needs nothing beyond Emacs and Org.
 | Org mode   | ≥ 9.3   | yes               | =ox-html=, which this backend derives from (tested on 9.8.7 and 9.8.10) |
 | =htmlize=  | ≥ 1.34  | no                | syntax colours in =#+BEGIN_SRC= blocks            |
 | LaTeX + =dvipng= | any | no             | math as images, instead of the bundled KaTeX      |
+| =unzip=    | any     | no                | reading a background out of a PowerPoint template |
 | A browser  | any     | to present        | Chromium, Firefox and WebKit are all fine         |
 
 Math needs nothing installed. KaTeX 0.16.22 ships in =assets/katex= under its
@@ -137,6 +138,13 @@ Leave =ORG_PPT_SLIDE_LEVEL= at 1 and every =*= headline is simply a slide.
 | =#+ORG_PPT_FOOTER=      | text                     | none      |
 | =#+ORG_PPT_LOGO=        | path to an image         | none      |
 | =#+ORG_PPT_SLIDE_LEVEL= | integer                  | =1=       |
+| =#+ORG_PPT_FONT_SCALE=  | =0.9=, =90%= or =24px=   | none      |
+| =#+ORG_PPT_AUTOFIT=     | =t=, =nil=               | =nil=     |
+| =#+ORG_PPT_TITLE_BG=    | image, or a =.pptx= / =.potx= template | none |
+| =#+ORG_PPT_TITLE_BG_DIM= | =0= .. =1=              | =0=       |
+| =#+ORG_PPT_TITLE_BG_FIT= | =cover=, =contain=      | =cover=   |
+| =#+ORG_PPT_PRINT_NOTES= | =t=, =nil=               | =nil=     |
+| =#+ORG_PPT_PRINT_NOTES_HEIGHT= | pixels            | =290=     |
 
 Standard Org options still apply. =#+TITLE=, =#+SUBTITLE=, =#+AUTHOR= and
 =#+DATE= build the opening slide; =#+OPTIONS: toc:t= adds an agenda slide
@@ -159,7 +167,9 @@ Three org-ppt options ride on =#+OPTIONS=:
 | =:notes:=          | the subtree is speaker notes, never shown to the room   |
 | =:center:=         | centre the slide body                                   |
 | =:noexport:=       | standard Org — drop the subtree entirely                |
+| =:fit:= / =:nofit:= | turn autofit on or off for this slide alone            |
 | =:PPT_CLASS:= prop | extra CSS classes on the generated =<section>=          |
+| =:PPT_FONT_SCALE:= prop | type size for this slide alone                     |
 
 A =:notes:= subtree belongs *under* the slide it annotates.
 
@@ -172,6 +182,7 @@ Speaker-only text. Press s while presenting to see it.
 
 ,#+BEGIN_COLUMNS
 ,#+BEGIN_COLUMN
+,*** A heading works here
 Left-hand text.
 ,#+END_COLUMN
 ,#+BEGIN_COLUMN
@@ -212,6 +223,86 @@ Large statement text.
 Each press of =Space= reveals the next item. Set =#+OPTIONS: ppt-frag:t= to
 make this the behaviour of every list in the document.
 
+** Type size
+
+Body text is 26 px in the 1280 × 720 design space, and every other size on a
+slide — headings, code, tables, captions — is a fixed ratio of it. One value
+therefore moves the whole slide together, and there are three ways to set it.
+
+Resize the whole deck from the header:
+
+#+BEGIN_EXAMPLE
+,#+ORG_PPT_FONT_SCALE: 0.9     <- nine tenths of the built-in size
+,#+ORG_PPT_FONT_SCALE: 90%     <- the same thing
+,#+ORG_PPT_FONT_SCALE: 24px    <- set the base outright
+#+END_EXAMPLE
+
+Resize one slide from its property drawer:
+
+#+BEGIN_EXAMPLE
+,** A slide with a lot on it
+   :PROPERTIES:
+   :PPT_FONT_SCALE: 0.75
+   :END:
+#+END_EXAMPLE
+
+Or let the deck do it. With =#+ORG_PPT_AUTOFIT: t=, the runtime measures each
+slide once the fonts and images have settled and shrinks only the slides whose
+content runs past the frame. A slide that already fits is left at the deck
+size, so the deck does not drift into a dozen different type sizes. It never
+shrinks below =org-ppt-autofit-minimum= — half the deck size by default —
+because a slide nobody can read from the back of the room is not a fit.
+
+The three combine: autofit shrinks from whatever =#+ORG_PPT_FONT_SCALE= and
+=:PPT_FONT_SCALE:= left it at. Tag a single slide =:fit:= or =:nofit:= to
+overrule the deck-wide setting for that slide.
+
+Autofit only ever shrinks. Nothing is scaled up to fill a sparse slide, which
+would make a two-line slide shout.
+
+** A background for the title slide
+
+#+BEGIN_EXAMPLE
+,#+ORG_PPT_TITLE_BG: images/cover.jpg
+,#+ORG_PPT_TITLE_BG_DIM: 0.35
+#+END_EXAMPLE
+
+The image is embedded as a data URI like every other asset, so the deck stays
+one file. =TITLE_BG_DIM= washes the image with the slide's own surface colour,
+from 0 to 1 — a photograph usually needs 0.3 or more before the title text is
+readable over it. =TITLE_BG_FIT= chooses =cover= (fill the frame, cropping) or
+=contain= (fit the whole image in).
+
+*** Taking it from a PowerPoint template
+
+Brand assets usually arrive as a =.pptx= or =.potx=, not as a loose image.
+Point the same keyword at the template:
+
+#+BEGIN_EXAMPLE
+,#+ORG_PPT_TITLE_BG: brand/CompanyTemplate.potx
+#+END_EXAMPLE
+
+A PowerPoint package is a zip. org-ppt walks its relationship files — the
+first slide, then the layout that slide uses, then the master — and takes the
+largest picture at the shallowest level that has one, because a background
+covers the frame and a logo does not. That heuristic is right for ordinary
+corporate templates and wrong for some; when it picks the wrong one, name the
+member yourself:
+
+#+BEGIN_EXAMPLE
+,#+ORG_PPT_TITLE_BG: brand/CompanyTemplate.potx::ppt/media/image3.png
+#+END_EXAMPLE
+
+=M-x org-ppt-list-pptx-images= lists every picture in a template, largest
+first, in exactly the form that goes after =::=.
+
+Only the background picture is read. Nothing else in the template — layouts,
+placeholders, fonts, colours, text — is imported; =#+ORG_PPT_ACCENT= and the
+theme are how a deck matches a company's colours.
+
+Reading a template needs =unzip= on PATH. Without it the export says so and
+carries on with no background.
+
 ** Figures and graphs
 
 Ordinary Org image links work, and their files are embedded:
@@ -251,12 +342,31 @@ one slide.
 
 ** PDF handouts
 
-=Ctrl+P= in the browser, then "Save as PDF". Every slide becomes one landscape
-page with all fragments revealed. Headless, for a Makefile:
+=Ctrl+P= in the browser, then "Save as PDF". Every slide becomes one page,
+sized to the deck's own aspect ratio, with all fragments revealed. Headless,
+for a Makefile:
 
 #+BEGIN_SRC sh
 chromium --headless --print-to-pdf=talk.pdf --no-pdf-header-footer talk.html
 #+END_SRC
+
+*** Notes on the handout
+
+#+BEGIN_EXAMPLE
+,#+ORG_PPT_PRINT_NOTES: t
+#+END_EXAMPLE
+
+Each slide's speaker notes — from a =#+BEGIN_NOTES= block or a =:notes:=
+subtree — are printed in a band under that slide, so the handout is the deck
+plus what you were going to say about it. The page grows to hold the band, so
+it is still one slide per page, and the screen presentation is untouched:
+notes stay invisible to the room.
+
+Notes longer than the band are clipped rather than pushed onto a second page.
+Raise =#+ORG_PPT_PRINT_NOTES_HEIGHT= for a talk with long notes.
+
+Print backgrounds must be enabled in the browser's print dialog for the
+section dividers and any title background to appear.
 
 * Colour scheme
 
@@ -282,6 +392,15 @@ results, LaTeX fragments — keeps working. The backend replaces five things:
 - =special-block= adds the presentation blocks
 - =item= adds the fragment class to stepped lists
 
+One thing happens before the parse rather than during it. Org resolves outline
+structure before block structure, so a headline inside =#+BEGIN_COLUMNS= ends
+the section, the block never closes, and the block's own lines reach the slide
+as literal text. No transcoder can repair that — by the time the tree exists
+the columns are already gone. So org-ppt rewrites those headlines into an
+ordinary block first, on the copy of the buffer Org exports from. Your file is
+never touched, only balanced =COLUMNS= regions are entered, and text inside
+=#+BEGIN_SRC=, =#+BEGIN_EXAMPLE= and =#+BEGIN_EXPORT= is left alone.
+
 Slides live in a fixed 1280 × 720 (or 1024 × 768) stage that the runtime
 scales to the viewport. Layout is therefore identical on a laptop, a projector
 and a 4K TV — the same reason PowerPoint works in a fixed slide size.
@@ -289,11 +408,13 @@ and a 4K TV — the same reason PowerPoint works in a fixed slide size.
 ** Repository layout
 
 #+BEGIN_EXAMPLE
-org-ppt.el          the export backend
-assets/org-ppt.css  slide design, themes, print rules
-assets/org-ppt.js   navigation, overview, speaker notes, timer
-examples/demo.org   a deck exercising every feature
-test/               ERT suite
+org-ppt.el           the export backend
+assets/org-ppt.css   slide design, themes, print rules
+assets/org-ppt.js    navigation, overview, autofit, speaker notes, timer
+examples/demo.org    a deck exercising every feature
+examples/brand.potx  a throwaway PowerPoint template, so the demo deck can
+                     show a title background being read out of one
+test/                ERT suite
 #+END_EXAMPLE
 
 =assets/= is read at export time and inlined, so editing the CSS and
@@ -305,9 +426,21 @@ re-exporting is the whole design loop. No build step.
 make            # byte-compile
 make test       # ERT suite
 make demo       # export examples/demo.org
+make pdf        # export, then print it to build/demo.pdf with the notes
 make verify     # export, then headless screenshots into build/
 make clean
 #+END_SRC
+
+=make verify= screenshots one slide per feature. Override the list to look at
+something else:
+
+#+BEGIN_SRC sh
+make verify VERIFY_SLIDES="12 20 21"
+#+END_SRC
+
+Both browser targets pass =--force-prefers-reduced-motion=. Without it the
+capture races the slide's entrance fade, and two runs of an unchanged page
+differ by more than a percent of their pixels.
 
 * Licence
 

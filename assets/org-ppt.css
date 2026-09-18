@@ -87,12 +87,24 @@ body.opp-blackout { background: #000; }
   flex-direction: column;
   padding: 64px 84px 76px;
   box-sizing: border-box;
-  font-size: 26px;
+  /* Every type size on a slide is an em against this one, so a document
+     keyword, a per-slide property and the autofit runtime each move the whole
+     slide by setting one custom property. */
+  font-size: calc(var(--opp-base, 26px) * var(--opp-scale, 1) * var(--opp-fit, 1));
   line-height: 1.5;
   color: var(--ink);
 }
 
 .opp-slide.is-current { display: flex; }
+
+/* Autofit has to measure a slide that is not the current one, and a slide that
+   is not displayed has no dimensions at all. Laying every slide out at once,
+   invisibly, is what makes the measurement possible; nothing paints because the
+   class is added and removed inside one synchronous pass. */
+.opp-stage.is-measuring .opp-slide:not(.is-current) {
+  display: flex !important;
+  visibility: hidden;
+}
 
 /* Transitions ---------------------------------------------------------- */
 
@@ -114,7 +126,7 @@ body.opp-blackout { background: #000; }
 .opp-slide > h2 {
   margin: 0 0 26px;
   padding: 0 0 16px;
-  font-size: 46px;
+  font-size: calc(46em / 26);
   line-height: 1.15;
   font-weight: 650;
   letter-spacing: -.015em;
@@ -125,7 +137,7 @@ body.opp-blackout { background: #000; }
 
 .opp-slide h3 {
   margin: 22px 0 10px;
-  font-size: 31px;
+  font-size: calc(31em / 26);
   font-weight: 620;
   letter-spacing: -.01em;
   color: var(--accent);
@@ -133,7 +145,7 @@ body.opp-blackout { background: #000; }
 
 .opp-slide h4 {
   margin: 18px 0 8px;
-  font-size: 26px;
+  font-size: 1em;
   font-weight: 650;
   color: var(--ink-soft);
   text-transform: uppercase;
@@ -157,9 +169,29 @@ body.opp-blackout { background: #000; }
     var(--surface);
 }
 
+/* A background image supplied by #+ORG_PPT_TITLE_BG, which may have come out
+   of a PowerPoint template. The wash over it is the slide's own surface
+   colour, so the title text keeps the contrast the theme designed for it. */
+.opp-slide.opp-title.opp-has-bg {
+  background:
+    var(--opp-title-bg) center center / var(--opp-title-fit, cover) no-repeat,
+    var(--surface);
+  /* Browsers drop background images from a print unless asked twice. */
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.opp-slide.opp-title.opp-has-bg::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--surface);
+  opacity: var(--opp-title-dim, 0);
+}
+.opp-slide.opp-title.opp-has-bg > * { position: relative; z-index: 1; }
+
 .opp-title h1 {
   margin: 0;
-  font-size: 70px;
+  font-size: calc(70em / 26);
   line-height: 1.08;
   font-weight: 700;
   letter-spacing: -.028em;
@@ -168,7 +200,7 @@ body.opp-blackout { background: #000; }
 
 .opp-title .opp-subtitle {
   margin: 22px 0 0;
-  font-size: 30px;
+  font-size: calc(30em / 26);
   font-weight: 400;
   color: var(--ink-soft);
   max-width: 34ch;
@@ -183,7 +215,7 @@ body.opp-blackout { background: #000; }
 }
 
 .opp-title .opp-meta {
-  font-size: 23px;
+  font-size: calc(23em / 26);
   color: var(--ink-soft);
   line-height: 1.6;
 }
@@ -201,12 +233,12 @@ body.opp-blackout { background: #000; }
   border: 0;
   padding: 0;
   margin: 0;
-  font-size: 62px;
+  font-size: calc(62em / 26);
   color: #fff;
   letter-spacing: -.025em;
 }
 .opp-slide.opp-section .opp-kicker {
-  font-size: 21px;
+  font-size: calc(21em / 26);
   letter-spacing: .16em;
   text-transform: uppercase;
   opacity: .78;
@@ -214,7 +246,7 @@ body.opp-blackout { background: #000; }
   font-weight: 600;
 }
 .opp-slide.opp-section .opp-body { flex: 0 0 auto; }
-.opp-slide.opp-section p { color: rgba(255,255,255,.9); font-size: 27px; }
+.opp-slide.opp-section p { color: rgba(255,255,255,.9); font-size: calc(27em / 26); }
 
 /* ---------------------------------------------------------------- content */
 
@@ -262,7 +294,7 @@ body.opp-blackout { background: #000; }
   border-left: 5px solid var(--accent);
   border-radius: 8px;
   font-family: var(--mono);
-  font-size: 20px;
+  font-size: calc(20em / 26);
   line-height: 1.45;
   overflow: auto;
   max-height: 100%;
@@ -326,7 +358,7 @@ body.opp-blackout { background: #000; }
   background: var(--quote-bg);
   border-left: 5px solid var(--accent-2);
   border-radius: 0 8px 8px 0;
-  font-size: 27px;
+  font-size: calc(27em / 26);
   color: var(--ink-soft);
 }
 .opp-slide blockquote p:last-child { margin-bottom: 0; }
@@ -336,7 +368,7 @@ body.opp-blackout { background: #000; }
 .opp-slide table {
   border-collapse: collapse;
   margin: 0 0 .82em;
-  font-size: 22px;
+  font-size: calc(22em / 26);
   width: 100%;
 }
 .opp-slide th, .opp-slide td {
@@ -353,7 +385,7 @@ body.opp-blackout { background: #000; }
 .opp-slide tbody tr:nth-child(even) {
   background: color-mix(in srgb, var(--ink) 3.5%, transparent);
 }
-.opp-slide table caption { caption-side: bottom; font-size: 18px; color: var(--ink-faint); padding-top: 8px; }
+.opp-slide table caption { caption-side: bottom; font-size: calc(18em / 22); color: var(--ink-faint); padding-top: 8px; }
 
 /* Figures --------------------------------------------------------------- */
 
@@ -362,9 +394,9 @@ body.opp-blackout { background: #000; }
   margin: 0 0 .82em;
   text-align: center;
 }
-.opp-slide figure img { border-radius: 8px; max-height: 460px; object-fit: contain; }
+.opp-slide figure img { border-radius: 8px; max-height: calc(460em / 26); object-fit: contain; }
 .opp-slide figcaption, .opp-slide .figure-number {
-  font-size: 18px;
+  font-size: calc(18em / 26);
   color: var(--ink-faint);
   margin-top: 8px;
   font-style: normal;
@@ -373,7 +405,7 @@ body.opp-blackout { background: #000; }
 
 /* Cap image height on an ordinary slide: the frame is fixed, so an
    oversized image would otherwise push the slide past its own bottom. */
-.opp-slide .opp-body img { max-height: 470px; }
+.opp-slide .opp-body img { max-height: calc(470em / 26); }
 
 /* A :figure: slide gives one image the whole body, scaled up or down. */
 .opp-slide.opp-figure .opp-body {
@@ -429,7 +461,7 @@ body.opp-blackout { background: #000; }
 .opp-callout > *:last-child { margin-bottom: 0; }
 
 .opp-center { text-align: center; }
-.opp-big { font-size: 40px; line-height: 1.25; font-weight: 620; letter-spacing: -.015em; }
+.opp-big { font-size: calc(40em / 26); line-height: 1.25; font-weight: 620; letter-spacing: -.015em; }
 
 /* Fragments ------------------------------------------------------------- */
 
@@ -628,14 +660,16 @@ body.opp-printing .fragment { opacity: 1; filter: none; }
 
 /* ------------------------------------------------------------------ print */
 
-/* Ctrl-P from the browser produces one landscape page per slide. */
-@page { size: 1280px 720px; margin: 0; }
+/* Ctrl-P from the browser produces one page per slide. The @page rule itself
+   is emitted by the exporter, because @page cannot read a custom property and
+   the page has to match the stage -- 16:9 or 4:3, and taller still when the
+   deck prints its speaker notes. */
 
 @media print {
   html, body { overflow: visible; height: auto; background: #fff; }
   .opp-viewport { position: static; display: block; }
   .opp-stage {
-    width: 1280px;
+    width: var(--stage-w, 1280px);
     height: auto;
     transform: none;
     box-shadow: none;
@@ -645,8 +679,8 @@ body.opp-printing .fragment { opacity: 1; filter: none; }
     display: flex !important;
     position: relative;
     inset: auto;
-    width: 1280px;
-    height: 720px;
+    width: var(--stage-w, 1280px);
+    height: var(--stage-h, 720px);
     page-break-after: always;
     break-after: page;
     animation: none !important;
@@ -655,4 +689,53 @@ body.opp-printing .fragment { opacity: 1; filter: none; }
   }
   .fragment { opacity: 1 !important; filter: none !important; }
   .opp-overlay, .opp-speaker, .opp-progress { display: none !important; }
+
+  /* Speaker notes as a footnote band under their own slide. The page grew by
+     --opp-notes-band to hold it, so the handout is still one slide per page
+     and the slide keeps the proportions it had on screen. */
+  html[data-print-notes] .opp-slide {
+    height: calc(var(--stage-h, 720px) + var(--opp-notes-band, 290px));
+  }
+  html[data-print-notes] .opp-slide::after {
+    content: "";
+    position: absolute;
+    left: 0; right: 0;
+    top: var(--stage-h, 720px);
+    bottom: 0;
+    background: #fff;
+  }
+  html[data-print-notes] .opp-chrome {
+    bottom: var(--opp-notes-band, 290px);
+  }
+  html[data-print-notes] .opp-notes {
+    display: block;
+    position: absolute;
+    z-index: 1;
+    left: 84px; right: 84px;
+    top: calc(var(--stage-h, 720px) + 28px);
+    bottom: 34px;
+    overflow: hidden;
+    padding-top: 14px;
+    border-top: 2px solid var(--rule);
+    font-size: 16px;
+    line-height: 1.45;
+    color: var(--ink-soft);
+  }
+  html[data-print-notes] .opp-notes::before {
+    content: "Speaker notes";
+    display: block;
+    margin-bottom: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  html[data-print-notes] .opp-notes :where(h1, h2, h3, h4) {
+    font-size: 17px;
+    margin: .6em 0 .3em;
+  }
+  html[data-print-notes] .opp-notes p { margin: 0 0 .5em; }
+  html[data-print-notes] .opp-notes ul,
+  html[data-print-notes] .opp-notes ol { margin: 0 0 .5em; padding-left: 1.2em; }
 }
